@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ONDA · ARCOS · AURA — VR room</title>
+<meta name="robots" content="noindex">
+<style>
+  html, body { margin: 0; height: 100%; background: #0E0D0C; overflow: hidden; font-family: "Helvetica Neue", Arial, sans-serif; color: #EDE8E0; }
+  canvas { display: block; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0E0D0C; z-index: 5; transition: opacity .8s ease; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  .brand { font-weight: 300; letter-spacing: .45em; font-size: 22px; text-align: center; }
+  .brand small { display: block; margin-top: 14px; letter-spacing: .2em; font-size: 11px; color: #9C958B; }
+  #pct { margin-top: 28px; font-size: 12px; letter-spacing: .2em; color: #9C958B; text-align: center; }
+  #hud { position: fixed; left: 16px; right: 16px; bottom: 16px; display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; z-index: 3; pointer-events: none; }
+  #hud.hidden { display: none; }
+  #hud .t { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: rgba(237,232,224,.8); background: rgba(14,13,12,.55); padding: 9px 13px; border-radius: 10px; backdrop-filter: blur(8px); pointer-events: auto; }
+  #enter { pointer-events: auto; }
+  #vrbtn { position: static !important; transform: none !important; left: auto !important; bottom: auto !important; padding: 13px 22px !important; border-radius: 12px !important; border: 1px solid rgba(237,232,224,.5) !important; background: rgba(14,13,12,.7) !important; font: 600 13px "Helvetica Neue", Arial !important; letter-spacing: .14em; width: auto !important; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.16/build/index.module.js"
+} }
+</script>
+</head>
+<body>
+<div id="loading"><div><div class="brand">ONDA · ARCOS · AURA<small>LISTENING ROOM</small></div><div id="pct">0%</div></div></div>
+<div id="hud"><span class="t">Drag to look · WASD to walk · click doors, drawers, records, turntables and the tablets</span><span id="enter"></span></div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
