@@ -59,28 +59,31 @@ sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.02; sun.shadow.radius = 8; 
 sun.layers.enable(5); scene.add(sun, sun.target);
 const windowFill = new THREE.RectAreaLight('#FFF4E6', 2.2, R.gx * 2, R.gh);
 windowFill.position.set(0, R.gh / 2, ROOM.D / 2 - 0.06); windowFill.lookAt(0, R.gh / 2, 0); scene.add(windowFill);
+// soft daylight from the window that casts shadows (the rect window fill cannot): a broad spot just inside the window head,
+// so everything between it and a surface is inside the room, every object throws a soft shadow away from the glass
+const skyFill = new THREE.SpotLight('#EEF2F6', 0, 0, 1.25, 1, 1);
+skyFill.castShadow = true; skyFill.position.set(0, 2.38, ROOM.D / 2 - 0.25); skyFill.target.position.set(0, 0.15, -1.3); scene.add(skyFill, skyFill.target);
 const hemi = new THREE.HemisphereLight('#F3EEE6', '#7A6450', 0.25); hemi.layers.enable(5); scene.add(hemi);
 const spots = {};
 
 // ════════════════════════════════════════════════════════════════════ state
-// graphics quality (never the resolution): sun shadow resolution and softness, gallery spots casting soft shadows
-const QUALITY = { Standard: { shadow: 2048, spotShadow: 0, blur: 8 }, High: { shadow: 4096, spotShadow: 1024, blur: 12 }, Ultra: { shadow: 4096, spotShadow: 2048, blur: 20 } };
+// graphics quality: a touch of supersampling, shadow resolution / softness for every shadow-casting light
+const QUALITY = { Standard: { scale: 1.0, shadow: 2048, light: 512, blur: 8 }, High: { scale: 1.15, shadow: 4096, light: 1024, blur: 12 }, Ultra: { scale: 1.25, shadow: 4096, light: 2048, blur: 20 } };
 let quality = 'High'; try { const q = localStorage.getItem('oaa-quality'); if (QUALITY[q]) quality = q; } catch (e) {}
+function setShadow(L, size, extra) { if (L.shadow.mapSize.x !== size) { L.shadow.mapSize.set(size, size); L.shadow.map?.dispose(); L.shadow.map = null; } Object.assign(L.shadow, extra); }
 function applyQuality() {
   const Q = QUALITY[quality];
-  if (sun.shadow.mapSize.x !== Q.shadow) { sun.shadow.mapSize.set(Q.shadow, Q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
-  sun.shadow.blurSamples = Q.blur;
-  for (const sp of Object.values(spots)) {
-    sp.castShadow = Q.spotShadow > 0;
-    if (Q.spotShadow && sp.shadow.mapSize.x !== Q.spotShadow) { sp.shadow.mapSize.set(Q.spotShadow, Q.spotShadow); sp.shadow.map?.dispose(); sp.shadow.map = null; }
-    Object.assign(sp.shadow, { bias: -0.0004, normalBias: 0.02, radius: 7, blurSamples: Q.blur }); sp.shadow.camera.near = 0.3; sp.shadow.camera.far = 7;
-  }
+  if (!renderer.xr.isPresenting) renderer.xr.setFramebufferScaleFactor(Q.scale);   // applies on the next Enter VR
+  setShadow(sun, Q.shadow, { blurSamples: Q.blur });
+  setShadow(skyFill, Q.shadow / 2, { bias: -0.0005, normalBias: 0.03, radius: 14, blurSamples: Q.blur + 4 }); skyFill.shadow.camera.near = 0.3; skyFill.shadow.camera.far = 9;
+  const local = [...Object.values(spots), R.haloLight];
+  for (const L of local) { L.castShadow = true; setShadow(L, Q.light, { bias: -0.0004, normalBias: 0.02, radius: 7, blurSamples: Q.blur }); L.shadow.camera.near = 0.2; L.shadow.camera.far = 7; }
   shadowDirty = true;
   try { localStorage.setItem('oaa-quality', quality); } catch (e) {}
 }
 const S = { hour: 21.8, hourTarget: 21.8, sunRot: 0.15, gallery: true, dimmer: 0.75, volume: 0.8, floor: 0, playing: null };
 const pieces = {}, movers = [], lpUnits = [], loose = [], hitTargets = [], colliders = [], followers = [];
-let music = null, shadowDirty = true;
+let music = null, shadowDirty = true, shadowT = 1;
 const moverOfNode = new Map();                       // drawer / door node -> its mover (to know if a rack is reachable)
 
 const BAYS = {
@@ -722,7 +725,7 @@ function lighting(dt) {
   const day = smooth(-0.05, 0.25, elev), low = 1 - smooth(0.08, 0.5, elev), night = 1 - day;
   sun.position.copy(dir).multiplyScalar(12); sun.target.position.set(0, 0.8, -0.4);
   sun.intensity = 1.15 * day; sun.color.copy(C('#FFE9CF')).lerp(C('#FFB273'), low * 0.8);
-  windowFill.intensity = 0.1 + 1.9 * day; windowFill.color.copy(C('#FFF4E6')).lerp(C('#FFD2A8'), low * day * 0.6);
+  windowFill.intensity = 0.1 + 1.25 * day; skyFill.intensity = 2.6 * day; windowFill.color.copy(C('#FFF4E6')).lerp(C('#FFD2A8'), low * day * 0.6);
   scene.environmentIntensity = 0.1 + 0.2 * day;
   hemi.intensity = 0.1 + 0.18 * day;
   P.glassM.uniforms.bright.value = 0.55 + 0.6 * day; P.glassM.uniforms.haze.value = 0.2 - 0.08 * night;
@@ -735,7 +738,7 @@ function lighting(dt) {
   R.cove.emissiveIntensity = (0.5 + 1.2 * night) * (0.35 + 0.65 * S.dimmer);
   R.bulb.intensity = 2.4 * night * S.dimmer; R.shadeM.emissiveIntensity = 0.1 + 0.9 * night * S.dimmer;
   R.ceilM.emissiveIntensity = 0.035 * night * S.dimmer;                         // only the cove's bounce; daylight comes from the lights
-  R.ringM.emissiveIntensity = S.dimmer * (0.5 + 2.2 * night); R.haloLight.intensity = S.dimmer * (0.3 + 2.6 * night);
+  R.ringM.emissiveIntensity = S.dimmer * (0.5 + 2.2 * night); R.haloLight.intensity = S.dimmer * (0.4 + 3.4 * night);
   for (const k of RK) { const bp = pieces[k]?.bp; if (!bp) continue; const on = S.gallery ? 0.3 + 0.7 * S.dimmer : 0; bp.washM.opacity = on * (0.06 + 0.3 * night); bp.lensM.emissiveIntensity = on * 2.2; }
   renderer.toneMappingExposure = 1.0 + 0.08 * night;
   dust.material.opacity += ((0.12 + 0.2 * day * (1 - low * 0.5)) - dust.material.opacity) * Math.min(1, dt * 2);
@@ -843,7 +846,7 @@ function frame() {
     if (l.calm > 0.5) { b.setLinvel({ x: 0, y: 0, z: 0 }, false); b.setAngvel({ x: 0, y: 0, z: 0 }, false); b.sleep(); l.calm = 0; }
   }
   if ((uiTick += dt) > 1) { uiTick = 0; S.clock = fmtH(S.hour); tablets.forEach(t => t.draw(S)); }
-  if (shadowDirty) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
+  shadowT += dt; if (shadowDirty && shadowT >= 1 / 30) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; shadowT = 0; }
   P.update(renderer, camera);              // what is behind the glass, from where your eyes are
   renderer.render(scene, camera);
 }

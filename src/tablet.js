@@ -15,7 +15,7 @@ export class Tablet {
     this.group = new THREE.Group();
     const body = new THREE.Mesh(new RoundedBoxGeometry(this.w + 0.016, this.h + 0.016, 0.007, 4, 0.008),
       new THREE.MeshStandardMaterial({ color: '#8E9196', metalness: 0.9, roughness: 0.32 }));
-    body.position.z = 0.0035; this.group.add(body);
+    body.position.z = 0.0035; body.castShadow = true; this.group.add(body);
     const glass = new THREE.Mesh(new RoundedBoxGeometry(this.w + 0.012, this.h + 0.012, 0.002, 4, 0.006),
       new THREE.MeshStandardMaterial({ color: '#050506', roughness: 0.08, metalness: 0.1 }));
     glass.position.z = 0.0075; this.group.add(glass);

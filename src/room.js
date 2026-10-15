@@ -208,10 +208,10 @@ export function buildRoom(scene) {
   const side = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.2, 0.48, 48), new THREE.MeshStandardMaterial({ color: '#CFC3AF', roughness: 0.7 }));
   side.position.set(-1.3, 0.24, 2.25); side.castShadow = side.receiveShadow = true; room.add(side);
   const lamp = new THREE.Group();
-  const lb = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.175, 0.028, 48), new THREE.MeshStandardMaterial({ color: '#2B2826', roughness: 0.3 })); lb.position.y = 0.014; lamp.add(lb);
-  const ls = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 1.42, 16), brass); ls.position.y = 0.74; lamp.add(ls);
+  const lb = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.175, 0.028, 48), new THREE.MeshStandardMaterial({ color: '#2B2826', roughness: 0.3 })); lb.position.y = 0.014; lb.castShadow = lb.receiveShadow = true; lamp.add(lb);
+  const ls = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 1.42, 16), brass); ls.position.y = 0.74; ls.castShadow = true; lamp.add(ls);
   const shadeM = new THREE.MeshStandardMaterial({ color: '#F1E7D6', roughness: 0.95, side: THREE.DoubleSide, emissive: new THREE.Color('#FFC98A'), emissiveIntensity: 0.4 });
-  const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.24, 0.33, 48, 1, true), shadeM); shade.position.y = 1.56; lamp.add(shade);
+  const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.24, 0.33, 48, 1, true), shadeM); shade.position.y = 1.56; shade.castShadow = true; lamp.add(shade);
   const bulb = new THREE.PointLight('#FFC98A', 0, 4, 2); bulb.position.y = 1.5; lamp.add(bulb);
   lamp.position.set(-2.62, 0, 1.2); room.add(lamp);
 
@@ -287,7 +287,7 @@ export function buildRoom(scene) {
   const cableM = new THREE.MeshBasicMaterial({ color: '#2A2724' });
   for (let k = 0; k < 3; k++) { const a = k / 3 * Math.PI * 2 + 0.5, c = new THREE.Mesh(new THREE.CylinderGeometry(0.0009, 0.0009, ROOM.H - hy, 4), cableM); c.position.set(Math.cos(a) * hr, (ROOM.H - hy) / 2, Math.sin(a) * hr); halo.add(c); }
   const canopyM = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.015, 40), bronze); canopyM.position.y = ROOM.H - hy - 0.0075; halo.add(canopyM);
-  const haloLight = new THREE.PointLight('#FFD3A0', 0, 6, 2); haloLight.position.y = -0.06; halo.add(haloLight);
+  const haloLight = new THREE.SpotLight('#FFD3A0', 0, 7, 1.2, 1, 2); haloLight.position.y = -0.03; halo.add(haloLight, haloLight.target); haloLight.target.position.set(0, -2, 0);   // wide soft downlight: casts shadows with one map
   halo.position.set(0, hy, 0.55); room.add(halo);
 
   return { room, sky, cove, shadeM, bulb, sheerM, walls, steel, brass, HX, HZ, gx, gh, ceilM, stoneM, ringM, haloLight, rugTop };
@@ -312,7 +312,7 @@ export function buildBay(bay, kind, info) {
   const glow = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(0.6, w * 0.53), 0.012), new THREE.MeshBasicMaterial({ color: '#FFE6C2' })); glow.rotation.x = Math.PI / 2; glow.position.set(0, cy + h / 2 + 0.073, 0.15); g.add(glow);
   // plaque
   const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.008), [info.edge, info.edge, info.edge, info.edge, new THREE.MeshStandardMaterial({ map: textTexture(info.plaque), roughness: 0.6 }), info.edge]);
-  plaque.position.set(info.plaqueX + 0.06, 1.38, 0.005); g.add(plaque);
+  plaque.position.set(info.plaqueX + 0.06, 1.38, 0.005); plaque.castShadow = true; g.add(plaque);
   // warm wash the picture light throws down the canvas (additive gradient, faded in at dusk)
   const washT = canvasTex(128, 256, (gg, W, H) => { const gr = gg.createRadialGradient(W / 2, 0, 4, W / 2, 0, H); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.45, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); gg.fillStyle = gr; gg.fillRect(0, 0, W, H); }, false);
   const washM = new THREE.MeshBasicMaterial({ map: washT, color: '#FFD7A6', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
