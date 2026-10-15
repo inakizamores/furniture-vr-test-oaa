@@ -99,7 +99,8 @@ export function buildPatio(scene, R) {
   // into a small target every frame, then the shader blurs it (mip bias) and refracts it through 26 mm flutes.
   // Moving your head shifts what is behind the glass, with real depth.
   out.traverse(o => o.layers.set(5)); sky.layers.set(5);
-  const mkRT = () => new THREE.WebGLRenderTarget(512, Math.round(512 * gh / (2 * gx)), { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+  // 4x MSAA: without it thin shapes (chair legs, trunks, hedge edges) pop between pixels as you move and the blur turns that into flashes
+  const mkRT = () => new THREE.WebGLRenderTarget(768, Math.round(768 * gh / (2 * gx)), { samples: 4, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
   const rtL = mkRT(), rtR = mkRT();
   const glassM = new THREE.ShaderMaterial({
     uniforms: { tL: { value: rtL.texture }, tR: { value: rtR.texture }, vpL: { value: new THREE.Matrix4() }, vpR: { value: new THREE.Matrix4() },
@@ -114,7 +115,7 @@ export function buildPatio(scene, R) {
         float rx = vW.x / 0.026, f = fract(rx) - 0.5;
         float k = 1.0 - smoothstep(0.12, 0.4, fwidth(rx));       // fade the reeds out where they get smaller than a few pixels (no moire)
         uv.x += f * 0.03 * k;                                     // each reed is a small cylindrical lens
-        vec3 col = left ? textureLod(tL, uv, 2.6).rgb : textureLod(tR, uv, 2.6).rgb;   // fixed blur level: always frosted, no seams
+        vec3 col = left ? textureLod(tL, uv, 3.2).rgb : textureLod(tR, uv, 3.2).rgb;   // fixed blur level: always frosted, no seams
         col = mix(col, milk * (0.35 + 0.65 * dot(col, vec3(0.33))), haze);   // etched haze lifts and softens
         col *= 1.0 + k * 0.1 * (cos(f * 6.2832) - 0.4);                   // crest highlight, valley shade
         gl_FragColor = vec4(col * bright, 1.0);

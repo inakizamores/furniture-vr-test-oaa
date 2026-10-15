@@ -81,7 +81,9 @@ function applyQuality() {
   shadowDirty = true;
   try { localStorage.setItem('oaa-quality', quality); } catch (e) {}
 }
-const S = { hour: 21.8, hourTarget: 21.8, sunRot: 0.15, gallery: true, dimmer: 0.75, volume: 0.8, floor: 0, playing: null };
+// room scale: scaling the rig (eye height, eye separation, hands) by 1/s makes the whole world s times bigger around you
+function applyScale() { rig.scale.setScalar(1 / S.scale); try { localStorage.setItem('oaa-scale', S.scale); } catch (e) {} }
+const S = { scale: (() => { try { const v = parseFloat(localStorage.getItem('oaa-scale')); return v >= 0.85 && v <= 1.3 ? v : 1; } catch (e) { return 1; } })(), eye: '–', hour: 21.8, hourTarget: 21.8, sunRot: 0.15, gallery: true, dimmer: 0.75, volume: 0.8, floor: 0, playing: null };
 const pieces = {}, movers = [], lpUnits = [], loose = [], hitTargets = [], colliders = [], followers = [];
 let music = null, shadowDirty = true, shadowT = 1;
 const moverOfNode = new Map();                       // drawer / door node -> its mover (to know if a rack is reachable)
@@ -343,10 +345,11 @@ tA.button('gallery', 952, 540, 180, 96, 'Spots', { active: s => s.gallery, small
 tA.button('quality', 952, 668, 180, 96, () => quality, { sub: () => 'graphics', small: true });
 tA.slider('floor', 48, 680, 860, 'Floor height (if the room feels too big or small)', { value: s => (s.floor + 0.3) / 0.6, fmt: s => `${s.floor >= 0 ? '+' : ''}${Math.round(s.floor * 100)} cm`, gradient: ['#8FA3B8', '#8FA3B8'] });
 RK.forEach((k, i) => tB.button('rec' + i, 48 + i * 364, 150, 344, 210, () => `${RECORDS[k].title}`, { sub: s => s.playing === k ? '▮▮  playing on ' + k.toUpperCase() : '▶  play on ' + k.toUpperCase(), active: s => s.playing === k }));
-tB.slider('vol', 48, 430, 1084, 'Volume', { value: s => s.volume });
-tB.button('openall', 48, 540, 344, 104, 'Open everything', { small: true });
-tB.button('closeall', 412, 540, 344, 104, 'Close everything', { small: true });
-tB.button('reset', 776, 540, 356, 104, 'Reset room', { small: true });
+tB.slider('vol', 48, 400, 1084, 'Volume', { value: s => s.volume });
+tB.slider('scale', 48, 505, 1084, 'Room scale (if the furniture feels too small or too big)', { value: s => (s.scale - 0.85) / 0.45, fmt: s => `${Math.round(s.scale * 100)}%  ·  your eyes at ${s.eye} m`, gradient: ['#8FA3B8', '#E8C79A'] });
+tB.button('openall', 48, 598, 344, 88, 'Open everything', { small: true });
+tB.button('closeall', 412, 598, 344, 88, 'Close everything', { small: true });
+tB.button('reset', 776, 598, 356, 88, 'Reset room', { small: true });
 tB.text((g, s, W, H) => { g.fillStyle = 'rgba(237,232,224,0.5)'; g.font = '400 22px "Helvetica Neue", Arial'; g.textAlign = 'left';
   g.fillText('Grip: grab doors, drawers, records and ceramics · grip a cabinet to move it', 48, H - 112);
   g.fillText('Let go of a record by a turntable and it plays itself · near a glowing slot it slides back in', 48, H - 78);
@@ -361,6 +364,7 @@ function uiAction(id, v) {
   else if (id === 'quality') { const ks = Object.keys(QUALITY); quality = ks[(ks.indexOf(quality) + 1) % ks.length]; applyQuality(); }
   else if (id === 'floor') { S.floor = Math.round((v * 0.6 - 0.3) * 100) / 100; rig.position.y = S.floor; }
   else if (id.startsWith('rec')) togglePlay(RK[+id.slice(3)]);
+  else if (id === 'scale') { S.scale = Math.round((0.85 + v * 0.45) * 100) / 100; applyScale(); }
   else if (id === 'vol') { S.volume = v; if (music && S.playing) music.out[S.playing].gain.setTargetAtTime(v, music.ctx.currentTime, 0.05); }
   else if (id === 'openall') movers.forEach(m => (m.target = 1, m.anim = true));
   else if (id === 'closeall') movers.forEach(m => (m.target = 0, m.anim = true));
@@ -845,13 +849,14 @@ function frame() {
     l.calm = Math.hypot(v.x, v.y, v.z) < 0.06 && Math.hypot(w.x, w.y, w.z) < 2.5 ? (l.calm || 0) + dt : 0;
     if (l.calm > 0.5) { b.setLinvel({ x: 0, y: 0, z: 0 }, false); b.setAngvel({ x: 0, y: 0, z: 0 }, false); b.sleep(); l.calm = 0; }
   }
-  if ((uiTick += dt) > 1) { uiTick = 0; S.clock = fmtH(S.hour); tablets.forEach(t => t.draw(S)); }
+  // once a second: clock + tracked eye height above your real floor (shows whether the headset's floor calibration is right)
+  if ((uiTick += dt) > 1) { uiTick = 0; S.clock = fmtH(S.hour); S.eye = camera.position.y.toFixed(2); tablets.forEach(t => t.draw(S)); }
   shadowT += dt; if (shadowDirty && shadowT >= 1 / 30) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; shadowT = 0; }
   P.update(renderer, camera);              // what is behind the glass, from where your eyes are
   renderer.render(scene, camera);
 }
 S.clock = fmtH(S.hour); tablets.forEach(t => t.draw(S));
-applyQuality();
+applyQuality(); applyScale();
 renderer.setAnimationLoop(frame);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
