@@ -63,9 +63,20 @@ const hemi = new THREE.HemisphereLight('#F3EEE6', '#7A6450', 0.25); hemi.layers.
 const spots = {};
 
 // ════════════════════════════════════════════════════════════════════ state
+// graphics quality: supersampling (render above the headset's native resolution), foveation, shadow resolution
+const QUALITY = { Standard: { scale: 1.0, fov: 0.6, shadow: 2048 }, High: { scale: 1.3, fov: 0.35, shadow: 4096 }, Ultra: { scale: 1.6, fov: 0.2, shadow: 4096 } };
+let quality = 'High'; try { const q = localStorage.getItem('oaa-quality'); if (QUALITY[q]) quality = q; } catch (e) {}
+function applyQuality() {
+  const Q = QUALITY[quality];
+  if (!renderer.xr.isPresenting) renderer.xr.setFramebufferScaleFactor(Q.scale);   // takes effect on the next Enter VR
+  renderer.xr.setFoveation(Q.fov);
+  if (sun.shadow.mapSize.x !== Q.shadow) { sun.shadow.mapSize.set(Q.shadow, Q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; shadowDirty = true; }
+  try { localStorage.setItem('oaa-quality', quality); } catch (e) {}
+}
 const S = { hour: 21.8, hourTarget: 21.8, sunRot: 0.15, gallery: true, dimmer: 0.75, volume: 0.8, floor: 0, playing: null };
 const pieces = {}, movers = [], lpUnits = [], loose = [], hitTargets = [], colliders = [], followers = [];
 let music = null, shadowDirty = true;
+const moverOfNode = new Map();                       // drawer / door node -> its mover (to know if a rack is reachable)
 
 const BAYS = {
   aura: { pos: V(0, 0, -ROOM.D / 2), rot: 0 },
@@ -82,7 +93,8 @@ const RK = ['onda', 'arcos', 'aura'];
 // ════════════════════════════════════════════════════════════════════ geometry helpers
 const RX = {
   lp: /jacket|LP_sleeve/i,
-  spinner: /Turntable_platter|LP_on_platter|^Platter|^Record$|^Record_label$/i,
+  spinner: /Turntable_platter|^Platter/i,
+  disc: /LP_on_platter|^Record$|^Record_label$/i,
   arm: /^Tonearm$|^Tonearm_tube$/i,
   armPivot: /^Tonearm_pivot$|^Tonearm_pillar$/i,
   speaker: /Speaker_[LR]_cabinet|^Soundbar_\(by|^Subwoofer_\(by/i,
@@ -145,7 +157,7 @@ function setupPiece(key, gltf, motions) {
   const moverNodes = new Map(), mo = motions[key] || {};
   src.traverse(o => { const a = gltf.parser.associations.get(o); if (a && a.nodes !== undefined && mo[a.nodes]) moverNodes.set(o, mo[a.nodes]); });
   const ctxOf = o => { for (let p = o; p && p !== src.parent; p = p.parent) if (moverNodes.has(p)) return p; return src; };
-  const groups = new Map(), spin = [], arm = [], armPivot = [], speakers = [], deck = [];
+  const groups = new Map(), spin = [], disc = [], arm = [], armPivot = [], speakers = [], deck = [];
   const all = []; src.traverse(o => { if (o.isMesh) all.push(o); });
   for (const m of all) {
     const ctx = ctxOf(m);
@@ -155,6 +167,7 @@ function setupPiece(key, gltf, motions) {
     if (lpNode) { if (!G.lps.has(lpNode)) G.lps.set(lpNode, []); G.lps.get(lpNode).push(m); continue; }
     if (ownMatch(m, src, RX.speaker)) speakers.push(m);
     if (ownMatch(m, src, RX.deck)) deck.push(m);
+    if (ownMatch(m, src, RX.disc)) { disc.push(m); continue; }
     if (ownMatch(m, src, RX.spinner)) { spin.push(m); continue; }
     if (ownMatch(m, src, RX.arm)) { arm.push(m); continue; }
     if (ownMatch(m, src, RX.armPivot)) armPivot.push(m);
@@ -165,10 +178,13 @@ function setupPiece(key, gltf, motions) {
 
   // physics: one kinematic body per piece (follows the holder) and one per door / drawer
   const fPiece = new PHYS.Follower(inner); followers.push(fPiece); rec.follower = fPiece;
-  for (const m of [...(groups.get(src)?.static || []), ...spin, ...arm]) fPiece.box(boxOf([m], inner));
+  for (const m of [...spin, ...disc]) fPiece.box(boxOf([m], inner));                       // platter + record: flat discs, boxes are exact enough
 
   // turntable
-  if (spin.length) { const c = boxOf(spin, inner).getCenter(V()); const piv = new THREE.Group(); piv.position.copy(c); inner.add(piv); mergeInto(piv, spin); rec.spinner = piv; }
+  if (spin.length || disc.length) {
+    const c = boxOf([...spin, ...disc], inner).getCenter(V()); const piv = new THREE.Group(); piv.position.copy(c); inner.add(piv); mergeInto(piv, spin); rec.spinner = piv;
+    if (disc.length) { const dg = new THREE.Group(); piv.add(dg); mergeInto(dg, disc); rec.disc = dg; rec.discTop = boxOf(disc, inner).max.y - c.y; }
+  }
   if (arm.length) {
     const pc = boxOf(armPivot.length ? armPivot : arm, inner).getCenter(V());
     const piv = new THREE.Group(); piv.position.copy(pc); inner.add(piv); mergeInto(piv, arm); rec.arm = piv;
@@ -184,17 +200,20 @@ function setupPiece(key, gltf, motions) {
   if (deck.length) {
     const b = boxOf(deck, inner), box = new THREE.Mesh(new THREE.BoxGeometry(...b.getSize(V()).toArray()), new THREE.MeshBasicMaterial({ visible: false }));
     box.position.copy(b.getCenter(V())); inner.add(box); box.userData.turntable = key; hitTargets.push(box);
+    rec.deckHalf = b.getSize(V()).x / 2;
   }
   for (const s of speakers) rec.speakers.push(boxOf([s], inner).getCenter(V()));
 
   for (const [node, m] of moverNodes) {
     const mv = { piece: key, node, t: 0, target: 0, p0: node.position.clone(), q0: node.quaternion.clone(), p1: V(...m.t), q1: new THREE.Quaternion(...m.r), name: m.name };
-    movers.push(mv); rec.movers.push(mv);
+    movers.push(mv); rec.movers.push(mv); moverOfNode.set(node, mv);
   }
   for (const [ctx, G] of groups) {
     const target = ctx === src ? inner : ctx;
-    if (ctx !== src) { const f = new PHYS.Follower(ctx); followers.push(f); for (const m of G.static) f.box(boxOf([m], ctx)); const mv = movers.find(x => x.node === ctx); mv.follower = f; }
+    const f = ctx === src ? fPiece : new PHYS.Follower(ctx); if (ctx !== src) { followers.push(f); movers.find(x => x.node === ctx).follower = f; }
     const meshes = mergeInto(target, G.static, { bvh: true, collide: ctx === src });
+    for (const mm of meshes) f.trimesh(mm.geometry);                                         // exact physics surfaces
+    if (G.lps.size) { const rb = boxOf(G.lps.values().next().value ? [...G.lps.values()].flat() : [], target); if (!rb.isEmpty()) f.box(rb); }
     if (ctx !== src) { const mv = movers.find(x => x.node === ctx); mv.meshes = meshes; for (const mm of meshes) { mm.userData.mover = mv; hitTargets.push(mm); } }
     if (G.lps.size) buildRack(target, G.lps, key);
   }
@@ -215,6 +234,7 @@ function buildRack(ctx, lpMap, key) {
   }
   const geo = mergeGeometries(geos);
   const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.rack = true; ctx.add(mesh);
+  (pieces[key].racks ||= []).push(mesh);
   const orig = geo.attributes.position.array.slice();
   for (const u of units) { u.mesh = mesh; u.orig = orig; u.center = u.box.getCenter(V()); lpUnits.push(u); }
 }
@@ -241,10 +261,29 @@ function lpMeshFromUnit(u) {
   geo.computeBoundingBox();
   // the rack lives in mm (mover / wrapper space) or m (inner): bake the world scale into the LP geometry
   u.mesh.updateMatrixWorld(true); const P = V(), Q = new THREE.Quaternion(), Sc = V(); u.mesh.matrixWorld.decompose(P, Q, Sc);
-  geo.scale(Sc.x, Sc.y, Sc.z); geo.computeBoundingBox();
+  geo.scale(Sc.x, Sc.y, Sc.z);
+  // records lean in their racks: re-express the geometry in its own principal axes so "flat" is truly flat and the collider is thin
+  const B = principalAxes(geo.attributes.position); geo.applyMatrix4(B.clone().transpose()); geo.computeBoundingBox();
   const m = new THREE.Mesh(geo, u.mesh.material); m.castShadow = m.receiveShadow = true;
-  m.position.copy(c).applyMatrix4(u.mesh.matrixWorld); m.quaternion.copy(Q); scene.add(m);
+  m.position.copy(c).applyMatrix4(u.mesh.matrixWorld); m.quaternion.copy(Q).multiply(new THREE.Quaternion().setFromRotationMatrix(B)); scene.add(m);
   return m;
+}
+// orthonormal basis (columns, right-handed) of a point cloud's principal axes, largest spread first (Jacobi on the covariance)
+function principalAxes(pa) {
+  const n = pa.count, m = [0, 0, 0]; for (let i = 0; i < n; i++) { m[0] += pa.getX(i); m[1] += pa.getY(i); m[2] += pa.getZ(i); } m.forEach((v, i) => (m[i] = v / n));
+  const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < n; i++) { const d = [pa.getX(i) - m[0], pa.getY(i) - m[1], pa.getZ(i) - m[2]]; for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) A[r][c] += d[r] * d[c]; }
+  const E = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (let sweep = 0; sweep < 12; sweep++) for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+    if (Math.abs(A[p][q]) < 1e-12) continue;
+    const th = 0.5 * Math.atan2(2 * A[p][q], A[q][q] - A[p][p]), c = Math.cos(th), s = Math.sin(th);
+    for (let k = 0; k < 3; k++) { const a = A[k][p], b = A[k][q]; A[k][p] = c * a - s * b; A[k][q] = s * a + c * b; }
+    for (let k = 0; k < 3; k++) { const a = A[p][k], b = A[q][k]; A[p][k] = c * a - s * b; A[q][k] = s * a + c * b; }
+    for (let k = 0; k < 3; k++) { const a = E[k][p], b = E[k][q]; E[k][p] = c * a - s * b; E[k][q] = s * a + c * b; }
+  }
+  const order = [0, 1, 2].sort((a, b) => A[b][b] - A[a][a]), cols = order.map(j => V(E[0][j], E[1][j], E[2][j]).normalize());
+  if (cols[0].clone().cross(cols[1]).dot(cols[2]) < 0) cols[2].negate();
+  return new THREE.Matrix4().makeBasis(cols[0], cols[1], cols[2]);
 }
 function makeLoose(mesh, opts) { const l = { mesh, phys: new PHYS.Dynamic(mesh, opts), held: null, ...opts.extra }; loose.push(l); return l; }
 
@@ -293,7 +332,8 @@ tA.slider('hour', 48, 330, 1084, 'Time of day', { value: s => (s.hourTarget - 5)
 tA.slider('rot', 48, 440, 1084, 'Sun direction', { value: s => (s.sunRot + 1) / 2, fmt: s => `${Math.round(s.sunRot * 70)}°` });
 tA.slider('dim', 48, 550, 860, 'Interior lights', { value: s => s.dimmer });
 tA.button('gallery', 952, 540, 180, 96, 'Spots', { active: s => s.gallery, small: true });
-tA.slider('floor', 48, 680, 1084, 'Floor height (if the room feels too big or too small)', { value: s => (s.floor + 0.3) / 0.6, fmt: s => `${s.floor >= 0 ? '+' : ''}${Math.round(s.floor * 100)} cm`, gradient: ['#8FA3B8', '#8FA3B8'] });
+tA.button('quality', 952, 668, 180, 96, () => quality, { sub: () => 'graphics', small: true });
+tA.slider('floor', 48, 680, 860, 'Floor height (if the room feels too big or small)', { value: s => (s.floor + 0.3) / 0.6, fmt: s => `${s.floor >= 0 ? '+' : ''}${Math.round(s.floor * 100)} cm`, gradient: ['#8FA3B8', '#8FA3B8'] });
 RK.forEach((k, i) => tB.button('rec' + i, 48 + i * 364, 150, 344, 210, () => `${RECORDS[k].title}`, { sub: s => s.playing === k ? '▮▮  playing on ' + k.toUpperCase() : '▶  play on ' + k.toUpperCase(), active: s => s.playing === k }));
 tB.slider('vol', 48, 430, 1084, 'Volume', { value: s => s.volume });
 tB.button('openall', 48, 540, 344, 104, 'Open everything', { small: true });
@@ -301,7 +341,7 @@ tB.button('closeall', 412, 540, 344, 104, 'Close everything', { small: true });
 tB.button('reset', 776, 540, 356, 104, 'Reset room', { small: true });
 tB.text((g, s, W, H) => { g.fillStyle = 'rgba(237,232,224,0.5)'; g.font = '400 22px "Helvetica Neue", Arial'; g.textAlign = 'left';
   g.fillText('Grip: grab doors, drawers, records and ceramics · grip a cabinet to move it', 48, H - 112);
-  g.fillText('Trigger: point to open / close or to pull a record to your hand · press a turntable to play', 48, H - 78);
+  g.fillText('Let go of a record by a turntable and it plays itself · near a glowing slot it slides back in', 48, H - 78);
   g.fillText('Left stick walks · right stick turns', 48, H - 44); });
 
 function uiAction(id, v) {
@@ -310,6 +350,7 @@ function uiAction(id, v) {
   else if (id === 'rot') S.sunRot = v * 2 - 1;
   else if (id === 'dim') S.dimmer = v;
   else if (id === 'gallery') S.gallery = !S.gallery;
+  else if (id === 'quality') { const ks = Object.keys(QUALITY); quality = ks[(ks.indexOf(quality) + 1) % ks.length]; applyQuality(); }
   else if (id === 'floor') { S.floor = Math.round((v * 0.6 - 0.3) * 100) / 100; rig.position.y = S.floor; }
   else if (id.startsWith('rec')) togglePlay(RK[+id.slice(3)]);
   else if (id === 'vol') { S.volume = v; if (music && S.playing) music.out[S.playing].gain.setTargetAtTime(v, music.ctx.currentTime, 0.05); }
@@ -341,12 +382,183 @@ function togglePlay(k) {
   tablets.forEach(t => t.draw(S));
 }
 
+// ════════════════════════════════════════════════════════════════════ records: snapping, laying flat, auto-loading a turntable
+// Every placement is animated (tweens), every slot / deck is claimed before an animation starts, so two hands, a reset
+// or a second record arriving mid-sequence can never leave things half-done.
+const tweens = [];
+const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+function tween(dur, fn) { return new Promise(res => tweens.push({ t: 0, dur, fn, res })); }
+function runTweens(dt) { for (let i = tweens.length - 1; i >= 0; i--) { const w = tweens[i]; w.t = Math.min(1, w.t + dt / w.dur); w.fn(ease(w.t)); if (w.t >= 1) { tweens.splice(i, 1); w.res(); } } }
+let epoch = 0;                                     // bumped by reset: running sequences notice and stop
+const alive = e => e === epoch;
+const wait = s => tween(s, () => {});
+const isLP = l => !!l.unit;
+function lpThin(geo) { geo.computeBoundingBox(); const s = geo.boundingBox.getSize(V()); return { axis: s.x <= s.y && s.x <= s.z ? V(1, 0, 0) : s.y <= s.z ? V(0, 1, 0) : V(0, 0, 1), half: Math.min(s.x, s.y, s.z) / 2, size: s }; }
+function slotPose(u) { u.mesh.updateMatrixWorld(true); return { p: u.center.clone().applyMatrix4(u.mesh.matrixWorld), q: u.mesh.getWorldQuaternion(new THREE.Quaternion()) }; }
+function removeLoose(l) { l.removed = true; l.phys.remove(); scene.remove(l.mesh); const i = loose.indexOf(l); if (i >= 0) loose.splice(i, 1); shadowDirty = true; }
+// glide a loose object to a pose (target may be a function, re-evaluated every frame, e.g. a slot in a moving drawer)
+function glide(l, target, dur, ep) {
+  const p0 = l.mesh.position.clone(), q0 = l.mesh.quaternion.clone();
+  return tween(dur, e => { if (l.removed || !alive(ep)) return; const T = typeof target === 'function' ? target() : target; l.mesh.position.lerpVectors(p0, T.p, e); l.mesh.quaternion.slerpQuaternions(q0, T.q, e); l.phys.moveTo(l.mesh.position, l.mesh.quaternion); shadowDirty = true; });
+}
+// a slot can take a record when it is empty, not already claimed, and not shut inside a closed drawer
+function slotReachable(u) { const mv = moverOfNode.get(u.mesh.parent); return !mv || mv.t > 0.55; }
+function nearSlot(p, max = 0.2) {
+  let best = null, bd = max;
+  for (const u of lpUnits) { if (!u.out || u.claimed || !slotReachable(u)) continue; const d = slotPose(u).p.distanceTo(p); if (d < bd) { bd = d; best = u; } }
+  return best;
+}
+function nearDeck(p, max = 0.42) {
+  let best = null, bd = max;
+  for (const k of RK) { const r = pieces[k]; if (!r.spinner || r.busy) continue; const d = r.spinner.getWorldPosition(V()).distanceTo(p); if (d < bd) { bd = d; best = k; } }
+  return best;
+}
+async function snapToSlot(l, u) {
+  const ep = epoch; u.claimed = true; l.held = 'anim'; l.phys.hold(true); l.phys.ghost(true);
+  await glide(l, () => slotPose(u), 0.32, ep);
+  u.claimed = false; if (!alive(ep) || l.removed) return;
+  if (u !== l.unit) { const other = loose.find(x => x.unit === u && x !== l); if (other) other.unit = l.unit; }   // it took another record's slot: swap ownership
+  for (const k of RK) if (pieces[k].sleeve === l) pieces[k].sleeve = null;
+  rackHide(u, false); removeLoose(l);
+}
+// lay a record flat on whatever is below it (a top, a shelf, another record); not on top of a vase or bowl
+const _down = new THREE.Raycaster();
+function surfaceBelow(p, ignore, reach = 0.45) {
+  _down.set(V(p.x, p.y + 0.05, p.z), V(0, -1, 0)); _down.far = reach + 0.05;
+  const objs = [...colliders, ...loose.filter(x => x !== ignore && !x.removed && x.held !== 'anim').map(x => x.mesh)];
+  for (const r of RK) if (pieces[r].racks) objs.push(...pieces[r].racks);
+  const h = _down.intersectObjects(objs, false)[0]; if (!h || !h.face) return null;
+  const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+  const onLoose = loose.find(x => x.mesh === h.object);
+  if (n.y < 0.85 || h.object.userData.rack || (onLoose && !isLP(onLoose))) return null;
+  return h.point;
+}
+// a flat, fully supported, empty spot: all four corners land on the same surface height (no vase, deck or record under it)
+function footprintClear(at, hw, side, fwd, ignore) {
+  // exact: the slab of air the record will occupy (a few mm above the surface) must be empty: posts, rims, vases, other records
+  const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, Y, fwd));
+  if (!PHYS.boxFree(at.clone().addScaledVector(Y, 0.014), V(hw + 0.01, 0.009, hw + 0.01), q, ignore?.phys.body)) return false;
+  for (const l of loose) {                                     // nothing standing on it (vases, the bowl, records being animated)
+    if (l === ignore || l.removed) continue;
+    l.mesh.geometry.computeBoundingSphere(); const rad = l.mesh.geometry.boundingSphere.radius * 0.8, d = l.mesh.position.clone().sub(at);
+    if (Math.abs(d.y) > 0.4) continue;
+    const a = Math.abs(d.dot(side)), b = Math.abs(d.dot(fwd)); if (a < hw + rad && b < hw + rad) return false;
+  }
+  for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) {   // fully supported on one flat surface
+    const c = at.clone().addScaledVector(side, a * hw * 0.95).addScaledVector(fwd, b * hw * 0.95).addScaledVector(Y, 0.25), h = surfaceBelow(c, ignore, 0.35);
+    if (!h || Math.abs(h.y - at.y) > 0.012) return false;
+  }
+  return true;
+}
+function flatPose(l, at, yawFrom) {
+  const th = lpThin(l.mesh.geometry), q0 = yawFrom || l.mesh.quaternion, w = th.axis.clone().applyQuaternion(q0);
+  const q = new THREE.Quaternion().setFromUnitVectors(w.y < 0 ? w.negate() : w, Y).multiply(q0);
+  return { p: at.clone().add(V(0, Math.max(th.half, 0.003) + 0.001, 0)), q };     // matches the record's 6 mm collider
+}
+// set down by an animation: stays exactly there (solid to everything else), physical again once grabbed or its cabinet moves
+function park(l) { l.held = null; l.parked = true; l.phys.ghost(false); l.phys.hold(true); l.phys.moveTo(l.mesh.position, l.mesh.quaternion); shadowDirty = true; }
+function unpark(l) { if (!l.parked) return; l.parked = false; l.phys.hold(false); l.phys.place(l.mesh.position, l.mesh.quaternion); }
+async function layFlat(l, at = surfaceBelow(l.mesh.position, l)) {
+  if (!at) return false;
+  const ep = epoch, T = flatPose(l, at); l.held = 'anim'; l.phys.hold(true); l.phys.ghost(true);
+  await glide(l, T, 0.22, ep); if (!alive(ep) || l.removed) return true;
+  park(l); return true;
+}
+// vinyl seen while it travels from sleeve to platter
+function makeVinyl(k) {
+  const g = new THREE.Group();
+  const d = new THREE.Mesh(new THREE.CylinderGeometry(0.149, 0.149, 0.0018, 96), new THREE.MeshStandardMaterial({ color: '#0C0C0D', roughness: 0.28, metalness: 0.25 })); d.castShadow = true; g.add(d);
+  const lab = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.0022, 48), new THREE.MeshStandardMaterial({ color: { onda: '#C8452B', arcos: '#E8E2D6', aura: '#D9A441' }[k], roughness: 0.6 })); g.add(lab);
+  scene.add(g); vinyls.add(g); return g;
+}
+const vinyls = new Set();
+// the turntable sequence: (stop + put the previous record away) → sleeve up → disc out → disc onto the platter → sleeve aside → play
+async function loadDeck(l, k) {
+  const r = pieces[k], ep = epoch; r.busy = true; l.held = 'anim'; l.phys.hold(true); l.phys.ghost(true);
+  const done = () => { r.busy = false; };
+  try {
+    const Qh = r.holder.getWorldQuaternion(new THREE.Quaternion()), fwd = V(0, 0, 1).applyQuaternion(Qh), side = V(1, 0, 0).applyQuaternion(Qh);
+    const plat = () => r.spinner.getWorldPosition(V());
+    const th = lpThin(l.mesh.geometry), qStage = Qh.clone().multiply(new THREE.Quaternion().setFromUnitVectors(th.axis, V(0, 0, 1)));
+    const stage = () => plat().addScaledVector(Y, 0.27).addScaledVector(fwd, 0.14);
+    const sleeveUp = glide(l, () => ({ p: stage(), q: qStage }), 0.6, ep);
+    // AURA's deck sits under a dust cover: lift it first
+    const cover = r.movers.find(m => /dust/i.test(m.name)); if (cover && cover.t < 0.9) { cover.target = 1; cover.anim = true; await wait(0.9); }
+    // a record already playing here: stop, let the arm return and the platter slow down
+    if (S.playing === k) { togglePlay(k); }
+    while (alive(ep) && (Math.abs(r.armAngle) > 0.02 || r.spin > 0.6)) await wait(0.05);
+    await sleeveUp; if (!alive(ep) || l.removed) return done();
+    // the previous disc goes back into its sleeve (if that sleeve is still lying next to the deck), then the sleeve is put away
+    if (r.disc && r.disc.visible) {
+      const old = makeVinyl(r.discKey || k), d0 = V(); r.disc.getWorldPosition(d0); old.position.copy(d0); old.quaternion.copy(Qh); r.disc.visible = false;
+      const prev = r.sleeve && !r.sleeve.removed && !r.sleeve.held && loose.includes(r.sleeve) ? r.sleeve : null;
+      const lift = d0.clone().addScaledVector(Y, 0.1);
+      await tween(0.3, e => old.position.lerpVectors(d0, lift, e));
+      if (prev) {
+        const sp = prev.mesh.position.clone(), qv = Qh.clone().multiply(new THREE.Quaternion().setFromUnitVectors(Y, V(0, 0, 1)));
+        await tween(0.45, e => { old.position.lerpVectors(lift, sp.clone().addScaledVector(Y, 0.05), e); old.quaternion.slerpQuaternions(Qh, qv, e); });
+        await tween(0.2, e => old.scale.setScalar(1 - e * 0.98));
+        scene.remove(old); vinyls.delete(old);
+        r.sleeve = null;
+        if (prev.unit && prev.unit.out && !prev.unit.claimed && slotReachable(prev.unit)) snapToSlot(prev, prev.unit); else if (prev.unit) { const u = nearSlot(prev.mesh.position, 99); if (u) snapToSlot(prev, u); }
+      } else { await tween(0.3, e => { old.position.copy(lift).addScaledVector(Y, e * 0.05); old.scale.setScalar(1 - e * 0.98); }); scene.remove(old); vinyls.delete(old); }
+    }
+    if (!alive(ep) || l.removed) return done();
+    // new disc slides up out of the sleeve, swings flat over the platter and settles
+    const vin = makeVinyl(l.unit?.key || k), sP = stage(), qV = Qh.clone().multiply(new THREE.Quaternion().setFromUnitVectors(Y, V(0, 0, 1)));
+    vin.position.copy(sP); vin.quaternion.copy(qV);
+    await tween(0.55, e => vin.position.copy(sP).addScaledVector(Y, e * 0.33));
+    const top = plat().addScaledVector(Y, (r.discTop ?? 0.01)), above = top.clone().addScaledVector(Y, 0.1), from = vin.position.clone();
+    // meanwhile the empty sleeve lays itself down beside the deck (on a free spot), or goes back to its rack slot
+    let rest = null;
+    const hw = Math.max(th.size.x, th.size.y, th.size.z) / 2, gapX = (r.deckHalf ?? 0.23) + hw + 0.03;
+    for (const [dx, dz] of [[gapX, 0], [-gapX, 0], [gapX + 0.12, 0], [-gapX - 0.12, 0], [gapX, 0.06], [-gapX, 0.06]]) {
+      const c = plat().addScaledVector(side, dx).addScaledVector(fwd, dz).addScaledVector(Y, 0.3), at = surfaceBelow(c, l, 0.6);
+      const ok = at && Math.abs(at.y - top.y) < 0.2 && footprintClear(at, hw, side, fwd, l); if (ok) { rest = at; break; }
+    }
+    const restSleeve = rest ? glide(l, flatPose(l, rest, Qh.clone().multiply(new THREE.Quaternion().setFromUnitVectors(th.axis, V(0, 0, 1)))), 0.7, ep).then(() => { if (!alive(ep) || l.removed) return; park(l); r.sleeve = l; })
+      : (l.unit && l.unit.out && !l.unit.claimed ? snapToSlot(l, l.unit) : Promise.resolve().then(() => { l.held = null; l.phys.ghost(false); l.phys.hold(false); }));
+    await tween(0.6, e => { vin.position.lerpVectors(from, above, e); vin.quaternion.slerpQuaternions(qV, Qh, e); });
+    await tween(0.35, e => vin.position.lerpVectors(above, top, e));
+    scene.remove(vin); vinyls.delete(vin);
+    if (!alive(ep)) return done();
+    if (r.disc) { r.disc.position.set(0, 0, 0); r.disc.scale.setScalar(1); r.disc.visible = true; } r.discKey = l.unit?.key || k;
+    await restSleeve;
+    if (!alive(ep)) return done();
+    if (S.playing !== k) togglePlay(k);
+  } finally { done(); }
+}
+// what a held record would do if let go now: shown as a soft glow on the slot or the platter
+const ghostSlot = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#FFE2B5', transparent: true, opacity: 0.32, depthWrite: false }));
+const ghostDeck = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.004, 8, 96), new THREE.MeshBasicMaterial({ color: '#FFD9A0', transparent: true, opacity: 0.85, depthWrite: false }));
+ghostDeck.rotation.x = Math.PI / 2; ghostSlot.visible = ghostDeck.visible = false; scene.add(ghostSlot, ghostDeck);
+let ghostKey = null, ghostT = 0;
+function intentFor(l) {
+  if (!l || !isLP(l)) return null;
+  const p = l.mesh.position, u = nearSlot(p, 0.2), du = u ? slotPose(u).p.distanceTo(p) : 9;
+  if (u && du < 0.1) return { slot: u };                         // right at a slot: slot wins (ARCOS racks flank its deck)
+  const k = nearDeck(p, 0.36); if (k && p.y > pieces[k].spinner.getWorldPosition(V()).y - 0.03) return { deck: k };
+  return u ? { slot: u } : null;
+}
+function updateGhost(dt, heldList) {
+  ghostT += dt; let it = null;
+  for (const l of heldList) { it = intentFor(l); if (it) break; }
+  ghostSlot.visible = !!it?.slot; ghostDeck.visible = !!it?.deck;
+  if (it?.slot) { const u = it.slot, P2 = slotPose(u); ghostSlot.position.copy(P2.p); ghostSlot.quaternion.copy(P2.q); ghostSlot.scale.copy(u.box.getSize(V()).multiply(u.mesh.getWorldScale(V()))).multiplyScalar(1.04); }
+  if (it?.deck) { const r = pieces[it.deck]; ghostDeck.position.copy(r.spinner.getWorldPosition(V())).addScaledVector(Y, (r.discTop ?? 0.01) + 0.004); ghostDeck.material.opacity = 0.55 + 0.3 * Math.sin(ghostT * 6); }
+  const key = it ? (it.deck || it.slot.v0) : null; const changed = key !== ghostKey; ghostKey = key; return changed && key !== null;
+}
+
 // ════════════════════════════════════════════════════════════════════ movers / reset
 function applyMover(mv) { mv.node.position.lerpVectors(mv.p0, mv.p1, mv.t); mv.node.quaternion.slerpQuaternions(mv.q0, mv.q1, mv.t); shadowDirty = true; }
 function resetRoom() {
+  epoch++; tweens.length = 0; for (const v of vinyls) scene.remove(v); vinyls.clear();
+  if (deskHeld) deskHeld = null; for (const H of hands) H.held = null;
   for (const mv of movers) { mv.target = 0; mv.anim = true; }
-  for (let i = loose.length - 1; i >= 0; i--) { const l = loose[i]; if (l.unit) { rackHide(l.unit, false); l.phys.remove(); scene.remove(l.mesh); loose.splice(i, 1); } }
-  for (const l of loose) if (l.home) { l.held = null; l.phys.hold(false); l.phys.place(l.home.p, l.home.q); }
+  for (const l of [...loose]) if (l.unit) removeLoose(l);
+  for (const u of lpUnits) { u.claimed = false; if (u.out) rackHide(u, false); }
+  for (const k of RK) { const r = pieces[k]; r.busy = false; r.sleeve = null; r.discKey = null; if (r.disc) { r.disc.visible = true; r.disc.position.set(0, 0, 0); r.disc.scale.setScalar(1); } }
+  for (const l of loose) if (l.home) { l.held = null; l.parked = false; l.phys.ghost(false); l.phys.hold(false); l.phys.place(l.home.p, l.home.q); }
   for (const k of RK) { const r = pieces[k]; r.holder.position.copy(r.home); r.holder.rotation.set(0, 0, 0); }
   rig.position.set(START.pos.x, S.floor, START.pos.z); rig.rotation.y = START.yaw;
 }
@@ -405,16 +617,17 @@ function rayTarget(H) {
   return pick(raycaster);
 }
 const _inv = new THREE.Matrix4(), _ray = new THREE.Ray();
-function pick(rc) {
+function pick(rc, ignore = null) {
   rc.far = 12;
-  const hits = rc.intersectObjects([...tablets.map(t => t.screen), ...hitTargets, ...loose.map(l => l.mesh), ...colliders], false);
+  const hits = rc.intersectObjects([...tablets.map(t => t.screen), ...hitTargets, ...loose.filter(l => l !== ignore && l.held !== 'anim').map(l => l.mesh), ...colliders], false);
   let lpHit = null, lpD = Infinity, lastMesh = null;
   for (const u of lpUnits) {
     if (u.out) continue;
     if (u.mesh !== lastMesh) { lastMesh = u.mesh; _inv.copy(u.mesh.matrixWorld).invert(); _ray.copy(rc.ray).applyMatrix4(_inv); }
     const pt = _ray.intersectBox(u.box, _v2); if (pt) { const d = pt.applyMatrix4(u.mesh.matrixWorld).distanceTo(rc.ray.origin); if (d < lpD) { lpD = d; lpHit = u; } }
   }
-  const h = hits[0];
+  let h = hits[0];
+  { const lh = hits.find(x => loose.some(l => l.mesh === x.object)); if (lh && h && !h.object.userData.tablet && lh.distance <= h.distance + 0.08) h = lh; }
   if (lpHit && (!h || lpD <= h.distance + 0.01)) return { type: 'lp', u: lpHit, point: rc.ray.at(lpD, V()), distance: lpD };
   if (!h) return null;
   const o = h.object;
@@ -432,19 +645,19 @@ function press(H, kind) {
   if (!t) return;
   haptic(H, 0.5, 30);
   if (t.type === 'tablet') { H.uiTablet = t.t; t.t.pointer(t.uv, true, S, uiAction); return; }
-  if (t.type === 'turntable') { togglePlay(t.key); return; }
+  if (t.type === 'turntable') { if (!pieces[t.key].busy) togglePlay(t.key); return; }
   if (t.type === 'mover') {
     if (far) { t.mv.target = t.mv.t > 0.5 ? 0 : 1; t.mv.anim = true; return; }
     t.mv.anim = false; t.mv.node.updateMatrixWorld();
     H.held = { type: 'mover', mv: t.mv, local: t.mv.node.worldToLocal(p.clone()) }; return;
   }
   if (t.type === 'lp') { const m = lpMeshFromUnit(t.u); rackHide(t.u, true); const l = makeLoose(m, { shape: 'box', density: 600, extra: { unit: t.u } }); grab(H, l, F, far); return; }
-  if (t.type === 'loose') { grab(H, t.l, F, far); return; }
-  if (t.type === 'piece') { const r = t.r; H.held = { type: 'piece', r, startHolder: r.holder.position.clone(), startYaw: r.holder.rotation.y, startP: r.bay.worldToLocal(p.clone()), startCtrlYaw: yawOf(F) }; }
+  if (t.type === 'loose') { if (!t.l.held) grab(H, t.l, F, far); return; }
+  if (t.type === 'piece') { for (const l of loose) unpark(l); const r = t.r; H.held = { type: 'piece', r, startHolder: r.holder.position.clone(), startYaw: r.holder.rotation.y, startP: r.bay.worldToLocal(p.clone()), startCtrlYaw: yawOf(F) }; }
 }
 function yawOf(M) { _q.setFromRotationMatrix(M); const f = V(0, 0, -1).applyQuaternion(_q); return Math.atan2(f.x, f.z); }
 function grab(H, l, F, far) {
-  l.held = H; l.phys.hold(true);
+  l.parked = false; l.held = H; l.phys.hold(true);
   H.held = { type: 'loose', l, mode: far ? 'fly' : 'hold', fly: 0, offset: far ? null : new THREE.Matrix4().copy(F).invert().multiply(l.mesh.matrixWorld) };
 }
 function release(H) {
@@ -452,13 +665,15 @@ function release(H) {
   const h = H.held; if (!h) return; H.held = null;
   if (h.type === 'loose') {
     const l = h.l; l.held = null;
-    if (l.unit) {            // back into its slot if released close to it
-      const slot = l.unit.center.clone().applyMatrix4(l.unit.mesh.matrixWorld);
-      if (slot.distanceTo(l.mesh.position) < 0.13) { rackHide(l.unit, false); l.phys.remove(); scene.remove(l.mesh); loose.splice(loose.indexOf(l), 1); haptic(H, 0.3, 20); return; }
+    const n = H.hist.length, v = n > 5 ? H.hist[n - 1].clone().sub(H.hist[n - 5]).multiplyScalar(1 / (4 * H.dt)) : V();
+    if (isLP(l) && h.mode === 'hold') {
+      const it = intentFor(l);
+      if (it?.deck) { haptic(H, 0.5, 30); loadDeck(l, it.deck); return; }                 // left near a turntable: it plays itself
+      if (it?.slot) { haptic(H, 0.3, 20); snapToSlot(l, it.slot); return; }               // near a free slot: slides in
+      if (v.length() < 0.8 && surfaceBelow(l.mesh.position, l)) { layFlat(l); return; }   // set down gently: lies flat
     }
     l.phys.hold(false);
-    const n = H.hist.length;
-    if (n > 5) { const v = H.hist[n - 1].clone().sub(H.hist[n - 5]).multiplyScalar(1 / (4 * H.dt)); l.phys.throw(v.clampLength(0, 5)); }
+    if (n > 5) l.phys.throw(v.clampLength(0, 5));
   }
   if (h.type === 'mover') { h.mv.target = h.mv.t > 0.5 ? 1 : 0; h.mv.anim = true; }
 }
@@ -471,14 +686,25 @@ addEventListener('pointermove', e => { if (!dragging || renderer.xr.isPresenting
 addEventListener('pointerup', e => { if (dragging && !dragging.moved) deskClick(e); dragging = false; });
 function deskClick(e) {
   ensureAudio();
-  if (deskHeld) { const l = deskHeld; l.held = null; l.phys.hold(false); deskHeld = null; return; }
   raycaster.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1), camera);
+  if (deskHeld) {
+    const l = deskHeld; deskHeld = null; l.held = null;
+    if (isLP(l)) {
+      const t = pick(raycaster, l);
+      if (t) {
+        const k = t.type === 'turntable' && !pieces[t.key].busy ? t.key : nearDeck(t.point, 0.3); if (k) { loadDeck(l, k); return; }
+        const u = nearSlot(t.point, 0.25); if (u) { snapToSlot(l, u); return; }
+        const at = surfaceBelow(t.point.clone().add(V(0, 0.03, 0)), l, 0.12); if (at) { layFlat(l, at); return; }
+      }
+    }
+    l.phys.hold(false); return;
+  }
   const t = pick(raycaster); if (!t) return;
   if (t.type === 'tablet') { t.t.pointer(t.uv, true, S, uiAction); t.t.pointer(t.uv, false, S, uiAction); }
-  else if (t.type === 'turntable') togglePlay(t.key);
+  else if (t.type === 'turntable') { if (!pieces[t.key].busy) togglePlay(t.key); }
   else if (t.type === 'mover') { t.mv.target = t.mv.t > 0.5 ? 0 : 1; t.mv.anim = true; }
   else if (t.type === 'lp') { const m = lpMeshFromUnit(t.u); rackHide(t.u, true); const l = makeLoose(m, { shape: 'box', density: 600, extra: { unit: t.u } }); l.held = 'desk'; l.phys.hold(true); deskHeld = l; }
-  else if (t.type === 'loose') { t.l.held = 'desk'; t.l.phys.hold(true); deskHeld = t.l; }
+  else if (t.type === 'loose' && !t.l.held) { t.l.parked = false; t.l.held = 'desk'; t.l.phys.hold(true); deskHeld = t.l; }
 }
 
 // ════════════════════════════════════════════════════════════════════ time of day
@@ -494,7 +720,7 @@ function lighting(dt) {
   windowFill.intensity = 0.1 + 1.9 * day; windowFill.color.copy(C('#FFF4E6')).lerp(C('#FFD2A8'), low * day * 0.6);
   scene.environmentIntensity = 0.1 + 0.2 * day;
   hemi.intensity = 0.1 + 0.18 * day;
-  P.glassM.uniforms.bright.value = 0.55 + 0.6 * day; P.glassM.uniforms.haze.value = 0.36 - 0.14 * night;
+  P.glassM.uniforms.bright.value = 0.55 + 0.6 * day; P.glassM.uniforms.haze.value = 0.2 - 0.08 * night;
   P.sky.uniforms.top.value.copy(C('#0B1426')).lerp(C('#6F92B8'), day).lerp(C('#C7A27F'), low * day * 0.5);
   P.sky.uniforms.hor.value.copy(C('#1C2436')).lerp(C('#E9ECEA'), day).lerp(C('#F4C79A'), low * day * 0.8);
   for (const u of P.uplights) { const n = smooth(0.3, 0.8, night); u.material.color.copy(C('#000')).lerp(C('#FFE0B0'), n); u.userData.glow.opacity = 0.35 * n; }
@@ -521,6 +747,7 @@ const _F = new THREE.Matrix4(), _P = V(), _Q = new THREE.Quaternion(), _S = V();
 function frame() {
   clock.update(); const dt = Math.min(0.05, clock.getDelta());
   lighting(dt);
+  runTweens(dt);
   for (const mv of movers) if (mv.anim) { mv.t += (mv.target - mv.t) * Math.min(1, dt * 3.2); if (Math.abs(mv.target - mv.t) < 0.002) { mv.t = mv.target; mv.anim = false; } applyMover(mv); }
   for (const k of RK) {          // turntables: platter spins up to 33 1/3, arm swings over the lead-in groove
     const r = pieces[k];
@@ -598,10 +825,12 @@ function frame() {
     { const lim = walkLimit(rig.position); rig.position.x = lim.x; rig.position.z = lim.z; }
     if (deskHeld) { camera.updateMatrixWorld(); const p = V(0.1, -0.12, -0.45).applyMatrix4(camera.matrixWorld), q = camera.getWorldQuaternion(new THREE.Quaternion()); deskHeld.phys.moveTo(p, q); deskHeld.mesh.position.copy(p); deskHeld.mesh.quaternion.copy(q); shadowDirty = true; }
   }
+  { const held = [...hands.filter(H => H.held?.type === 'loose' && H.held.mode === 'hold').map(H => H.held.l), ...(deskHeld ? [deskHeld] : [])];
+    if (updateGhost(dt, held)) for (const H of hands) if (H.held?.type === 'loose') haptic(H, 0.25, 15); }
   // physics: furniture follows its meshes, records and ceramics follow their bodies
   for (const f of followers) f.sync();
   PHYS.step(dt);
-  for (const l of loose) if (!l.held && !l.phys.sleeping()) {
+  for (const l of loose) if (!l.held && !l.parked && !l.phys.sleeping()) {
     l.phys.syncMesh(); shadowDirty = true;
     // settle: once nearly still for half a second, put it to sleep (no micro-rocking on uneven tops)
     const b = l.phys.body, v = b.linvel(), w = b.angvel();
@@ -614,6 +843,7 @@ function frame() {
   renderer.render(scene, camera);
 }
 S.clock = fmtH(S.hour); tablets.forEach(t => t.draw(S));
+applyQuality();
 renderer.setAnimationLoop(frame);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
@@ -625,4 +855,4 @@ const vrb = VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'
 vrb.id = 'vrbtn'; $('#enter').appendChild(vrb);
 renderer.xr.addEventListener('sessionstart', () => { ensureAudio(); camera.position.set(0, 0, 0); $('#hud').classList.add('hidden'); revealed = false; reveal(); });
 renderer.xr.addEventListener('sessionend', () => { camera.position.set(0, 1.62, 0); $('#hud').classList.remove('hidden'); });
-window.APP = { P, scene, renderer, camera, rig, pieces, movers, lpUnits, loose, S, uiAction, togglePlay, tablets, pick, raycaster, deskClick, PHYS, setView(x, z, y, p) { rig.position.set(x, S.floor, z); yaw = y; pitch = p ?? pitch; } };
+window.APP = { P, surfaceBelow, footprintClear, scene, renderer, camera, rig, pieces, movers, lpUnits, loose, S, uiAction, togglePlay, tablets, pick, raycaster, deskClick, PHYS, setView(x, z, y, p) { rig.position.set(x, S.floor, z); yaw = y; pitch = p ?? pitch; } };

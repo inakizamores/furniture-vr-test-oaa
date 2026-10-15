@@ -26,6 +26,12 @@ export class Follower {
     if (s.x < 1e-4 || s.y < 1e-4 || s.z < 1e-4) return;
     world.createCollider(RAPIER.ColliderDesc.cuboid(s.x / 2, s.y / 2, s.z / 2).setTranslation(c.x, c.y, c.z).setFriction(0.7).setRestitution(0.05), this.body);
   }
+  trimesh(geo) {   // exact surface (geo in obj space): things rest on the real top, not on a bounding box
+    const p = geo.attributes.position, sc = this.scale, v = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) { v[i * 3] = p.getX(i) * sc.x; v[i * 3 + 1] = p.getY(i) * sc.y; v[i * 3 + 2] = p.getZ(i) * sc.z; }
+    const idx = geo.index ? new Uint32Array(geo.index.array) : Uint32Array.from({ length: p.count }, (_, i) => i);
+    world.createCollider(RAPIER.ColliderDesc.trimesh(v, idx).setFriction(0.7).setRestitution(0.05), this.body);
+  }
   // kinematic only while the object moves; fixed when idle, so whatever rests on it can settle and sleep
   sync() {
     this.obj.updateMatrixWorld(true);
@@ -57,7 +63,8 @@ export class Dynamic {
       }
       d = RAPIER.ColliderDesc.convexHull(new Float32Array(pts));
     }
-    if (!d) { const b = g.boundingBox, c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3()); d = RAPIER.ColliderDesc.cuboid(Math.max(s.x / 2, 0.0015), Math.max(s.y / 2, 0.0015), Math.max(s.z / 2, 0.0015)).setTranslation(c.x, c.y, c.z); }
+    // boxes are at least 6 mm thick: thinner ones tunnel through exact mesh surfaces
+    if (!d) { const b = g.boundingBox, c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3()); d = RAPIER.ColliderDesc.cuboid(Math.max(s.x / 2, 0.003), Math.max(s.y / 2, 0.003), Math.max(s.z / 2, 0.003)).setTranslation(c.x, c.y, c.z); }
     this.collider = world.createCollider(d.setDensity(density).setFriction(friction).setRestitution(restitution), this.body);
     this.held = false; this.ccd = ccd;
   }
@@ -66,6 +73,7 @@ export class Dynamic {
     this.body.enableCcd(!on && this.ccd);
     this.body.setBodyType(on ? RAPIER.RigidBodyType.KinematicPositionBased : RAPIER.RigidBodyType.Dynamic, true);
   }
+  ghost(on) { this.collider.setSensor(on); }      // animated by the app: passes through things instead of shoving them
   moveTo(pos, quat) { this.body.setNextKinematicTranslation({ x: pos.x, y: pos.y, z: pos.z }); this.body.setNextKinematicRotation({ x: quat.x, y: quat.y, z: quat.z, w: quat.w }); }
   throw(v, w) { this.body.setLinvel({ x: v.x, y: v.y, z: v.z }, true); if (w) this.body.setAngvel({ x: w.x, y: w.y, z: w.z }, true); }
   place(pos, quat) { this.body.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, true); this.body.setRotation({ x: quat.x, y: quat.y, z: quat.z, w: quat.w }, true); this.body.setLinvel({ x: 0, y: 0, z: 0 }, true); this.body.setAngvel({ x: 0, y: 0, z: 0 }, true); }
@@ -75,6 +83,13 @@ export class Dynamic {
   }
   sleeping() { return this.body.isSleeping(); }
   remove() { world.removeRigidBody(this.body); }
+}
+
+// is this box (world pose) free of every collider except those of `exclude` (a body)?
+export function boxFree(c, h, q, exclude = null) {
+  let free = true;
+  world.intersectionsWithShape({ x: c.x, y: c.y, z: c.z }, { x: q.x, y: q.y, z: q.z, w: q.w }, new RAPIER.Cuboid(h.x, h.y, h.z), col => { if (exclude && col.parent() === exclude) return true; free = false; return false; });
+  return free;
 }
 
 let acc = 0;

@@ -123,6 +123,30 @@ export class Music {
     o.connect(g); g.connect(this[k].bus); o.start(t); o.stop(t + 0.4);
   }
 
+  vibe(k, midi, t, dur, vel = 0.06) {            // vibraphone: two sine partials, motor tremolo
+    const c = this.ctx, f = mtof(midi), g = c.createGain(), trem = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
+    for (const [mul, a] of [[1, 1], [4, 0.22], [10.2, 0.04]]) { const o = c.createOscillator(); o.frequency.value = f * mul; const og = c.createGain(); og.gain.value = a; o.connect(og); og.connect(trem); o.start(t); o.stop(t + dur + 2); }
+    lfo.frequency.value = 5.2; lg.gain.value = 0.35; lfo.connect(lg); lg.connect(trem.gain); trem.gain.value = 0.65; lfo.start(t); lfo.stop(t + dur + 2);
+    trem.connect(g); this.env(g, t, 0.004, vel, 1.2, 0.25, 1.1, dur);
+    g.connect(this[k].bus); g.connect(this[k].send);
+  }
+  pluck(k, midi, t, vel = 0.07) {                 // harp-like: bright attack, filter closing fast
+    const c = this.ctx, o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
+    o.type = 'triangle'; o.frequency.value = mtof(midi); lp.type = 'lowpass'; lp.frequency.setValueAtTime(4200, t); lp.frequency.exponentialRampToValueAtTime(500, t + 0.9);
+    o.connect(lp); lp.connect(g); this.env(g, t, 0.002, vel, 1.6, 0.05, 0.8, 0.2);
+    g.connect(this[k].bus); g.connect(this[k].send); o.start(t); o.stop(t + 3);
+  }
+  lead(k, midi, t, dur, vel = 0.05) {             // lo-fi synth lead with tape wobble
+    const c = this.ctx, o = c.createOscillator(), o2 = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain(), w = c.createOscillator(), wg = c.createGain();
+    o.type = 'square'; o2.type = 'triangle'; o.frequency.value = o2.frequency.value = mtof(midi); o2.detune.value = 9;
+    w.frequency.value = 0.9; wg.gain.value = 14; w.connect(wg); wg.connect(o.detune); wg.connect(o2.detune);
+    lp.type = 'lowpass'; lp.frequency.value = 1500; lp.Q.value = 0.4;
+    const mix = c.createGain(); mix.gain.value = 0.5; o.connect(mix); o2.connect(lp); mix.connect(lp); lp.connect(g);
+    this.env(g, t, 0.02, vel, 0.3, 0.6, 0.35, dur);
+    g.connect(this[k].bus); g.connect(this[k].send);
+    for (const x of [o, o2, w]) { x.start(t); x.stop(t + dur + 0.5); }
+  }
+
   // ── records
   ondaStep(i, t, spb) {             // ii-V-I-VI in D minor-ish, swung brushes
     const bar = Math.floor(i / 16) % 8, s = i % 16;
@@ -132,15 +156,18 @@ export class Music {
     if (s % 4 === 0) this.bass('onda', prog[0] - 12 + [0, 7, 12, 10][s / 4], t, spb * 3.4);
     if (s % 2 === 0) this.hit('onda', t, { freq: 3500, type: 'bandpass', q: 0.6, dur: spb * 1.6, vel: s % 4 === 0 ? 0.03 : 0.018 });
     if (s === 4 || s === 12) this.hit('onda', t, { freq: 2200, type: 'bandpass', q: 0.4, dur: 0.22, vel: 0.05 });
-    if (bar % 2 === 1 && (s === 6 || s === 14) && Math.random() < 0.6) this.rhodes('onda', prog[1][prog[1].length - 1] + 12, t, spb * 2, 0.05);
+    if (s === 0 || s === 4 || s === 6 || s === 8 || s === 12 || s === 14) this.hit('onda', t, { freq: 7200, dur: s === 6 || s === 14 ? 0.12 : 0.35, vel: s === 6 || s === 14 ? 0.012 : 0.02 });   // ride: ting, ting-ga
+    if (bar % 4 >= 2 && s % 2 === 0 && Math.random() < 0.62) { const tones = prog[1]; this.vibe('onda', tones[Math.floor(Math.random() * tones.length)] + (Math.random() < 0.5 ? 12 : 0), t, spb * 1.6, 0.045); }
   }
   arcosStep(i, t, spb) {            // slow pads + bells on a pentatonic
     const bar = Math.floor(i / 16) % 4, s = i % 16;
     const chords = [[48, 55, 64, 67], [45, 52, 60, 67], [41, 53, 60, 64], [43, 55, 62, 67]][bar];
     if (s === 0) chords.forEach(m => this.pad('arcos', m, t, spb * 16, 0.035));
     if (s === 0) this.bass('arcos', chords[0] - 12, t, spb * 14, 0.12);
+    if (s % 2 === 0) { const up = [...chords, chords[1] + 12, chords[2] + 12, chords[3] + 12, chords[0] + 24]; this.pluck('arcos', up[(s / 2 + bar) % up.length] + 12, t, 0.045); }
+    if (s === 0 && bar === 0) this.pad('arcos', 36, t, spb * 64, 0.03);                                   // drone under the whole cycle
     const pent = [72, 74, 76, 79, 81, 84, 86, 88];
-    if ((s === 2 || s === 7 || s === 11 || s === 14) && Math.random() < 0.55) this.bell('arcos', pent[Math.floor(Math.random() * pent.length)], t, 0.035);
+    if ((s === 7 || s === 14) && Math.random() < 0.35) this.bell('arcos', pent[Math.floor(Math.random() * pent.length)], t, 0.035);
   }
   auraStep(i, t, spb) {             // lo-fi: Fmaj7 Em7 Dm7 Cmaj7
     const bar = Math.floor(i / 16) % 4, s = i % 16;
@@ -150,6 +177,8 @@ export class Music {
     if (s === 4 || s === 12) { this.hit('aura', t, { freq: 1800, type: 'bandpass', q: 0.7, dur: 0.18, vel: 0.09 }); }
     if (s % 2 === 0) this.hit('aura', t + (s % 4 === 2 ? spb * 0.12 : 0), { freq: 9000, dur: 0.03, vel: 0.025 });
     if (s === 0 || s === 6 || s === 10) this.bass('aura', prog[0], t, spb * 3, 0.2);
+    const mel = [[76, 0, 3], [74, 4, 2], [72, 6, 2], [69, 10, 4], [72, 16, 3], [74, 20, 2], [76, 22, 2], [79, 26, 5]];       // [note, step, length] over two bars
+    const pos = (bar % 2) * 16 + s; for (const [n, st, len] of mel) if (st === pos && bar >= 2) this.lead('aura', n, t, spb * len, 0.04);
     if (s % 4 === 0) this.hit('aura', t, { freq: 4000, type: 'bandpass', q: 0.3, dur: spb * 4, vel: 0.006 });   // crackle bed
     if (Math.random() < 0.08) this.hit('aura', t, { freq: 6000, dur: 0.012, vel: 0.05 });                     // dust pop
   }

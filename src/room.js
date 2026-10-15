@@ -141,6 +141,8 @@ export function buildRoom(scene) {
   // floor + ceiling
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.W, ROOM.D), floorM); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; room.add(floor);
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.W, ROOM.D), ceilM); ceil.rotation.x = Math.PI / 2; ceil.position.y = ROOM.H; room.add(ceil);
+  // solid roof slab above the ceiling: blocks the sun, so daylight only enters through the glazing
+  { const roof = new THREE.Mesh(new THREE.BoxGeometry(ROOM.W + 0.6, 0.3, ROOM.D + 0.6), walls); roof.position.y = ROOM.H + 0.15; roof.castShadow = true; room.add(roof); }
   // walls (0.2 thick), back / left / right solid; front glazed between x = -2.3 .. 2.3, y = 0 .. 2.75
   const T = 0.2;
   box(ROOM.W + 2 * T, ROOM.H, T, walls, 0, ROOM.H / 2, -HZ - T / 2);

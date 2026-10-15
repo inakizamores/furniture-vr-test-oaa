@@ -103,7 +103,7 @@ export function buildPatio(scene, R) {
   const rtL = mkRT(), rtR = mkRT();
   const glassM = new THREE.ShaderMaterial({
     uniforms: { tL: { value: rtL.texture }, tR: { value: rtR.texture }, vpL: { value: new THREE.Matrix4() }, vpR: { value: new THREE.Matrix4() },
-      eyeL: { value: new THREE.Vector3() }, eyeR: { value: new THREE.Vector3(0, -100, 0) }, bright: { value: 1 }, haze: { value: 0.36 }, milk: { value: new THREE.Color('#E9EAE6') } },
+      eyeL: { value: new THREE.Vector3() }, eyeR: { value: new THREE.Vector3(0, -100, 0) }, bright: { value: 1 }, haze: { value: 0.2 }, milk: { value: new THREE.Color('#E9EAE6') } },
     vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
     fragmentShader: `
       uniform sampler2D tL, tR; uniform mat4 vpL, vpR; uniform vec3 eyeL, eyeR, milk; uniform float bright, haze; varying vec3 vW;
@@ -114,7 +114,7 @@ export function buildPatio(scene, R) {
         float rx = vW.x / 0.026, f = fract(rx) - 0.5;
         float k = 1.0 - smoothstep(0.12, 0.4, fwidth(rx));       // fade the reeds out where they get smaller than a few pixels (no moire)
         uv.x += f * 0.03 * k;                                     // each reed is a small cylindrical lens
-        vec3 col = left ? textureLod(tL, uv, 3.3).rgb : textureLod(tR, uv, 3.3).rgb;   // fixed blur level: always frosted, no seams
+        vec3 col = left ? textureLod(tL, uv, 2.6).rgb : textureLod(tR, uv, 2.6).rgb;   // fixed blur level: always frosted, no seams
         col = mix(col, milk * (0.35 + 0.65 * dot(col, vec3(0.33))), haze);   // etched haze lifts and softens
         col *= 1.0 + k * 0.1 * (cos(f * 6.2832) - 0.4);                   // crest highlight, valley shade
         gl_FragColor = vec4(col * bright, 1.0);

@@ -13,8 +13,10 @@ Works on a desktop browser too (drag to look, WASD to walk, click to interact).
 - **Grip** (or pinch) to grab: doors swing on their hinges, drawers slide, LPs come out of the racks
   and can be carried, put back or dropped (real rigid-body physics); grip a cabinet body to slide or turn the whole piece.
 - **Trigger** at a distance: point at a door/drawer to open or close it, point at an LP to pull it to your hand.
-- **Turntables**: press one to play its record through that piece's speakers (music is generated live).
-- **Tablets**: time of day, sun direction, interior lights, gallery spots, floor height; records, volume, open/close all, reset.
+- **Records**: let go of one near a turntable and it loads itself (disc out of the sleeve, onto the platter, sleeve set aside, tonearm down);
+  near a free slot (it glows) it slides back in; set down gently on a top it lies flat. Each console plays its own track.
+- **Turntables**: press one to start / stop it (music is generated live, through that piece's speakers).
+- **Tablets**: time of day, sun direction, interior lights, gallery spots, floor height, graphics quality (High by default; Ultra supersamples more); records, volume, open/close all, reset.
 - Left stick walks, right stick snap-turns; hand tracking works for grabbing and tapping the tablets.
 
 Built with three.js (WebXR). The furniture models are the final CAD exports with real textures.
