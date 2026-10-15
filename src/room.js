@@ -132,7 +132,7 @@ function textTexture(lines, w = 1024, h = 512) {
 
 export function buildRoom(scene) {
   const room = new THREE.Group(); room.name = 'room'; scene.add(room);
-  const walls = plasterMaterial('#EFE9E0'), ceilM = new THREE.MeshStandardMaterial({ color: '#F4F1EC', roughness: 0.96, emissive: new THREE.Color('#F4EDE3'), emissiveIntensity: 0.22 }), floorM = floorMaterial();
+  const walls = plasterMaterial('#EFE9E0'), ceilM = new THREE.MeshStandardMaterial({ color: '#F6F3EE', roughness: 0.96, emissive: new THREE.Color('#FFE2BF'), emissiveIntensity: 0 }), floorM = floorMaterial();
   const steel = new THREE.MeshStandardMaterial({ color: '#1B1B1C', roughness: 0.45, metalness: 0.7 });
   const brass = new THREE.MeshStandardMaterial({ color: '#B8955E', metalness: 1, roughness: 0.3 });
   const add = (geo, mat, x, y, z, shadow = true) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.receiveShadow = true; m.castShadow = shadow; room.add(m); return m; };
@@ -153,30 +153,13 @@ export function buildRoom(scene) {
   // shadow-gap skirting (dark recessed line) around the solid walls
   const gap = new THREE.MeshStandardMaterial({ color: '#2A2724', roughness: 0.9 });
   box(ROOM.W, 0.018, 0.012, gap, 0, 0.009, -HZ + 0.006, 1, false); box(0.012, 0.018, ROOM.D, gap, -HX + 0.006, 0.009, 0, 1, false); box(0.012, 0.018, ROOM.D, gap, HX - 0.006, 0.009, 0, 1, false);
-  // steel glazing: mullions every 1.15 m, transom at 2.2
-  for (let i = 0; i <= 4; i++) box(0.05, gh, 0.08, steel, -gx + i * (2 * gx / 4), gh / 2, HZ + 0.02, 1);
-  box(2 * gx, 0.05, 0.08, steel, 0, gh - 0.025, HZ + 0.02, 1); box(2 * gx, 0.05, 0.08, steel, 0, 2.2, HZ + 0.02, 1); box(2 * gx, 0.04, 0.08, steel, 0, 0.02, HZ + 0.02, 1);
-  // acid-etched (frosted) glazing: soft daylight with the blurred shapes of a garden behind it, no sharp view to fake
-  const frostMap = canvasTex(1024, 672, (g, W, H) => {
-    const r2 = rng(13);
-    const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#FFFFFF'); sky.addColorStop(0.55, '#F3F3EF'); sky.addColorStop(1, '#DCDDD4');
-    g.fillStyle = sky; g.fillRect(0, 0, W, H);
-    const blob = (x, y, r, c, a) => { const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${c},${a})`); gr.addColorStop(1, `rgba(${c},0)`); g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r); };
-    for (let i = 0; i < 70; i++) blob(r2() * W, H * (0.42 + r2() * 0.5), 60 + r2() * 110, '120,128,104', 0.10 + r2() * 0.1);   // hedges / shrubs
-    for (const tx of [0.12, 0.83]) { for (let i = 0; i < 26; i++) blob(W * tx + (r2() - 0.5) * 220, H * (0.12 + r2() * 0.45), 50 + r2() * 90, '110,118,96', 0.08 + r2() * 0.08); blob(W * tx, H * 0.75, 30, '90,84,74', 0.25); } // two trees
-    const ter = g.createLinearGradient(0, H * 0.86, 0, H); ter.addColorStop(0, 'rgba(170,160,145,0)'); ter.addColorStop(1, 'rgba(170,160,145,0.35)'); g.fillStyle = ter; g.fillRect(0, H * 0.86, W, H * 0.14);
-    for (let i = 0; i < 90000; i++) { const v = r2() * 18; g.fillStyle = `rgba(255,255,255,${v / 255})`; g.fillRect(r2() * W, r2() * H, 1.2, 1.2); }   // etched grain
-  });
-  frostMap.wrapS = frostMap.wrapT = THREE.ClampToEdgeWrapping;
-  const glassM = new THREE.MeshStandardMaterial({ color: '#000000', emissive: new THREE.Color('#F1F2F0'), emissiveMap: frostMap, emissiveIntensity: 1.0, roughness: 0.2, metalness: 0 });
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2 * gx, gh), glassM);
-  glass.position.set(0, gh / 2, HZ + 0.04); glass.rotation.y = Math.PI; room.add(glass);
-  // a faint glossy sheet in front of the etched face: picks up room reflections like real glass
-  const sheen = new THREE.Mesh(new THREE.PlaneGeometry(2 * gx, gh), new THREE.MeshPhysicalMaterial({ color: '#FFFFFF', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.08, envMapIntensity: 1.5, depthWrite: false }));
-  sheen.position.set(0, gh / 2, HZ + 0.036); sheen.rotation.y = Math.PI; room.add(sheen);
+  // steel glazing frame: sidelights | French doors | sidelights, transom at 2.2 (panes + doors live in patio.js)
+  for (const x of [-gx, -gx / 2, gx / 2, gx]) box(0.05, gh, 0.08, steel, x, gh / 2, HZ + 0.02, 1);
+  box(2 * gx, 0.05, 0.08, steel, 0, gh - 0.025, HZ + 0.02, 1); box(2 * gx, 0.05, 0.08, steel, 0, 2.2, HZ + 0.02, 1);
+  for (const x of [-gx * 0.75, gx * 0.75]) box(gx / 2, 0.04, 0.08, steel, x, 0.02, HZ + 0.02, 1);
   // deep plaster reveals + a limestone threshold
   const stoneM = new THREE.MeshStandardMaterial({ color: '#CFC6B8', roughness: 0.55 });
-  box(2 * gx + 0.04, 0.02, 0.12, stoneM, 0, 0.01, HZ + 0.0, 1, false);
+  box(2 * gx + 0.04, 0.012, 0.16, stoneM, 0, 0.006, HZ + 0.02, 1, false);
   // ceiling: perimeter cove light (emissive strip) + three track spots
   const cove = new THREE.MeshStandardMaterial({ color: '#000', emissive: new THREE.Color('#FFD8A8'), emissiveIntensity: 0.8 });
   for (const [w, d, x, z] of [[ROOM.W - 0.3, 0.04, 0, -HZ + 0.15], [0.04, ROOM.D - 0.3, -HX + 0.15, 0], [0.04, ROOM.D - 0.3, HX - 0.15, 0]]) box(w, 0.01, d, cove, x, ROOM.H - 0.005, z, 1, false);
@@ -231,7 +214,42 @@ export function buildRoom(scene) {
   lamp.position.set(-2.62, 0, 1.2); room.add(lamp);
 
   room.add(plantInPot(-2.45, -2.15));
-  return { room, sky, cove, shadeM, bulb, glass, glassM, sheerM, walls, steel, brass, HX, HZ, gx, gh, ceilM };
+  const rugTop = 0.014;
+
+  // ── the small things that make a room real: sockets, switches, supply-air slots, smoke detector
+  const plateM = new THREE.MeshStandardMaterial({ color: '#ECE8E1', roughness: 0.35 }), holeM = new THREE.MeshStandardMaterial({ color: '#3A3632', roughness: 0.8 });
+  const fixture = (x, y, z, ry, kind) => {
+    const f = new THREE.Group(); f.position.set(x, y, z); f.rotation.y = ry; room.add(f);
+    const w = kind === 'switch2' ? 0.146 : 0.086, plate = new THREE.Mesh(new RoundedBoxGeometry(w, 0.086, 0.008, 2, 0.003), plateM); plate.position.z = 0.004; plate.receiveShadow = true; f.add(plate);
+    if (kind === 'socket') {
+      const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.019, 0.002, 32), new THREE.MeshStandardMaterial({ color: '#E2DDD5', roughness: 0.4 })); ring.rotation.x = Math.PI / 2; ring.position.z = 0.0085; f.add(ring);
+      for (const dx of [-0.0095, 0.0095]) { const h = new THREE.Mesh(new THREE.CylinderGeometry(0.0026, 0.0026, 0.002, 12), holeM); h.rotation.x = Math.PI / 2; h.position.set(dx, 0, 0.0092); f.add(h); }
+    } else for (let k = 0; k < (kind === 'switch2' ? 2 : 1); k++) { const r = new THREE.Mesh(new RoundedBoxGeometry(0.056, 0.056, 0.006, 2, 0.003), plateM); r.position.set(kind === 'switch2' ? (k - 0.5) * 0.062 : 0, 0, 0.0095); f.add(r); }
+    return f;
+  };
+  fixture(-1.6, 0.3, -HZ + 0.001, 0, 'socket'); fixture(1.6, 0.3, -HZ + 0.001, 0, 'socket');
+  fixture(-HX + 0.001, 0.3, 1.35, Math.PI / 2, 'socket'); fixture(-HX + 0.001, 0.3, -1.45, Math.PI / 2, 'socket');
+  fixture(HX - 0.001, 0.3, 0.55, -Math.PI / 2, 'socket'); fixture(HX - 0.001, 0.3, -2.1, -Math.PI / 2, 'socket');
+  fixture(-HX + 0.001, 1.08, 2.25, Math.PI / 2, 'switch2'); fixture(HX - 0.001, 1.08, 2.3, -Math.PI / 2, 'switch1');
+  const slotM = new THREE.MeshStandardMaterial({ color: '#141414', roughness: 0.9 });
+  for (const x of [-2.25, 2.25]) { const sl = new THREE.Mesh(new THREE.PlaneGeometry(0.022, 1.6), slotM); sl.rotation.x = Math.PI / 2; sl.position.set(x, ROOM.H - 0.001, 0.6); room.add(sl); }
+  const det = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.03, 40), plateM); det.position.set(1.2, ROOM.H - 0.015, 0.3); room.add(det);
+  const led = new THREE.Mesh(new THREE.CircleGeometry(0.003, 12), new THREE.MeshBasicMaterial({ color: '#7CFF9A' })); led.rotation.x = Math.PI / 2; led.position.set(1.22, ROOM.H - 0.0305, 0.3); room.add(led);
+
+  // ── minimalist halo pendant over the rug: thin bronze ring, opal light band, three hair-thin cables
+  const halo = new THREE.Group(), hr = 0.5, hy = 2.5;
+  const bronze = new THREE.MeshStandardMaterial({ color: '#3B342C', metalness: 0.85, roughness: 0.35 });
+  const ringM = new THREE.MeshStandardMaterial({ color: '#FFF6EA', roughness: 0.6, emissive: new THREE.Color('#FFD9A8'), emissiveIntensity: 0 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(hr, 0.014, 16, 160), bronze); ring.rotation.x = Math.PI / 2; ring.castShadow = true; halo.add(ring);
+  const band = new THREE.Mesh(new THREE.TorusGeometry(hr, 0.0095, 8, 160), ringM); band.rotation.x = Math.PI / 2; band.position.y = -0.009; halo.add(band);
+  const cableM = new THREE.MeshBasicMaterial({ color: '#2A2724' });
+  for (let k = 0; k < 3; k++) { const a = k / 3 * Math.PI * 2 + 0.5, c = new THREE.Mesh(new THREE.CylinderGeometry(0.0009, 0.0009, ROOM.H - hy, 4), cableM); c.position.set(Math.cos(a) * hr, (ROOM.H - hy) / 2, Math.sin(a) * hr); halo.add(c); }
+  const canopyM = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.015, 40), bronze); canopyM.position.y = ROOM.H - hy - 0.0075; halo.add(canopyM);
+  const haloLight = new THREE.PointLight('#FFD3A0', 0, 6, 2); haloLight.position.y = -0.06; halo.add(haloLight);
+  halo.position.set(0, hy, 0.55); room.add(halo);
+
+  return { room, sky, cove, shadeM, bulb, sheerM, walls, steel, brass, HX, HZ, gx, gh, ceilM, stoneM, ringM, haloLight, rugTop };
+
 }
 
 // picture + picture light + plaque + plinth for one bay (bay frame: origin on the wall at floor, +z into the room)
@@ -251,14 +269,23 @@ export function buildBay(bay, kind, info) {
   const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.15, 12), info.brass); arm.rotation.x = Math.PI / 2; arm.position.set(0, cy + h / 2 + 0.09, 0.075); g.add(arm);
   const glow = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(0.6, w * 0.53), 0.012), new THREE.MeshBasicMaterial({ color: '#FFE6C2' })); glow.rotation.x = Math.PI / 2; glow.position.set(0, cy + h / 2 + 0.073, 0.15); g.add(glow);
   // plaque
-  const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.006), [info.edge, info.edge, info.edge, info.edge, new THREE.MeshStandardMaterial({ map: textTexture(info.plaque), roughness: 0.6 }), info.edge]);
-  plaque.position.set(info.plaqueX, 1.42, 0.004); g.add(plaque);
+  const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.008), [info.edge, info.edge, info.edge, info.edge, new THREE.MeshStandardMaterial({ map: textTexture(info.plaque), roughness: 0.6 }), info.edge]);
+  plaque.position.set(info.plaqueX + 0.06, 1.38, 0.005); g.add(plaque);
+  // warm wash the picture light throws down the canvas (additive gradient, faded in at dusk)
+  const washT = canvasTex(128, 256, (gg, W, H) => { const gr = gg.createRadialGradient(W / 2, 0, 4, W / 2, 0, H); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.45, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); gg.fillStyle = gr; gg.fillRect(0, 0, W, H); }, false);
+  const washM = new THREE.MeshBasicMaterial({ map: washT, color: '#FFD7A6', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+  const wash = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.25, h * 1.1), washM); wash.position.set(0, cy + h / 2 + 0.06 - h * 0.55, 0.037); wash.renderOrder = 3; g.add(wash);
+  // recessed gallery downlight in the ceiling (the visible source of the bay's spot)
+  const trim = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.004, 40), new THREE.MeshStandardMaterial({ color: '#1C1B1A', roughness: 0.5, metalness: 0.4 })); trim.position.set(0, info.ceilH - 0.002, 1.5); g.add(trim);
+  const lensM = new THREE.MeshStandardMaterial({ color: '#000', emissive: new THREE.Color('#FFE3BF'), emissiveIntensity: 0 });
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.024, 32), lensM); lens.rotation.x = Math.PI / 2; lens.position.set(0, info.ceilH - 0.0045, 1.5); g.add(lens);
+
   // stone plinth under the piece
   const plinthM = new THREE.MeshStandardMaterial({ color: '#BDB5A8', roughness: 0.6 });
   const plinth = new THREE.Mesh(new RoundedBoxGeometry(info.plinthW, 0.03, info.plinthD, 2, 0.005), plinthM);
   plinth.position.set(0, 0.015, info.plinthD / 2 + 0.01); plinth.receiveShadow = true; g.add(plinth);
   bay.add(g);
-  return { plinthTop: 0.03, glow };
+  return { plinthTop: 0.03, glow, washM, lensM };
 }
 
 // soft contact shadow (radial blob) for under furniture

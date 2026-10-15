@@ -14,6 +14,7 @@ import { ROOM, buildRoom, buildBay, contactShadow, lightShafts } from './room.js
 import { Tablet } from './tablet.js';
 import { Music, RECORDS } from './music.js';
 import * as PHYS from './physics.js';
+import { buildPatio } from './patio.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -48,6 +49,7 @@ const listener = new THREE.AudioListener(); camera.add(listener);
 
 const R = buildRoom(scene);
 const dust = lightShafts(scene).dust;
+const P = buildPatio(scene, R);
 
 // lights: sun with soft shadows + a fill light in the glazing (the viewer's window fill) + gallery spots
 const sun = new THREE.DirectionalLight('#FFE9CF', 1.15);
@@ -129,7 +131,7 @@ function setupPiece(key, gltf, motions) {
   const inner = new THREE.Group(); holder.add(inner);
   inner.add(src); src.position.set(-ctr.x, -bb.min.y, -bb.min.z);
   const edge = new THREE.MeshStandardMaterial({ color: '#ECE6DD', roughness: 0.9 });
-  const bp = buildBay(bay, key, { artY: 0.03 + size.y + 0.25 + 0.42, edge, brass: R.brass, plaque: INFO[key].plaque, plaqueX: size.x / 2 + 0.36, plinthW: size.x + 0.32, plinthD: size.z + 0.26 });
+  const bp = buildBay(bay, key, { artY: 0.03 + size.y + 0.25 + 0.42, edge, brass: R.brass, plaque: INFO[key].plaque, plaqueX: size.x / 2 + 0.36, ceilH: ROOM.H, plinthW: size.x + 0.32, plinthD: size.z + 0.26 });
   holder.position.set(0, bp.plinthTop, 0.04); holder.updateMatrixWorld(true);
   const cs = contactShadow(size.x * 1.12, size.z * 1.5); cs.position.set(0, 0.002, size.z / 2); holder.add(cs);
   // plinth collider (bay space -> world)
@@ -158,7 +160,7 @@ function setupPiece(key, gltf, motions) {
     if (ownMatch(m, src, RX.armPivot)) armPivot.push(m);
     G.static.push(m);
   }
-  const rec = { key, bay, holder, inner, size, movers: [], speakers: [], spinner: null, arm: null, playing: false, spin: 0, armAngle: 0, home: holder.position.clone() };
+  const rec = { key, bay, holder, inner, size, bp, movers: [], speakers: [], spinner: null, arm: null, playing: false, spin: 0, armAngle: 0, home: holder.position.clone() };
   pieces[key] = rec;
 
   // physics: one kinematic body per piece (follows the holder) and one per door / drawer
@@ -270,7 +272,12 @@ const setProgress = (k, f) => { progress[k] = f; $('#pct').textContent = Math.ro
 const motions = await fetch('assets/motions.json').then(r => r.json());
 // room colliders: floor, walls, rug, reading corner
 PHYS.staticBox(10, 0.5, 10, V(0, -0.5, 0));
-PHYS.staticBox(ROOM.W / 2, ROOM.H / 2, 0.1, V(0, ROOM.H / 2, -ROOM.D / 2 - 0.1)); PHYS.staticBox(ROOM.W / 2, ROOM.H / 2, 0.1, V(0, ROOM.H / 2, ROOM.D / 2 + 0.1));
+PHYS.staticBox(ROOM.W / 2, ROOM.H / 2, 0.1, V(0, ROOM.H / 2, -ROOM.D / 2 - 0.1));
+{ const sw = (ROOM.W / 2 - P.dg) / 2; for (const s of [-1, 1]) PHYS.staticBox(sw, ROOM.H / 2, 0.1, V(s * (P.dg + sw), ROOM.H / 2, ROOM.D / 2 + 0.1)); PHYS.staticBox(P.dg, (ROOM.H - 2.2) / 2, 0.1, V(0, (ROOM.H + 2.2) / 2, ROOM.D / 2 + 0.1)); }
+PHYS.staticBox(1.35, 0.007, 0.95, V(0, 0.007, 0.55));                                         // rug
+PHYS.staticBox(P.PX + 1, 1.3, 0.45, V(0, 1.3, P.Z0 + P.PD + 0.45)); PHYS.staticBox(P.PX, 0.45, 0.16, V(0, 0.45, P.Z0 + P.PD - 0.16));   // patio hedges / wall
+for (const s of [-1, 1]) PHYS.staticBox(0.4, 1.15, P.PD / 2 + 0.2, V(s * (P.PX + 0.4), 1.15, P.Z0 + P.PD / 2 + 0.2));
+PHYS.staticBox(0.5, 0.31, 0.5, V(-2.25, 0.31, P.Z0 + 2.9)); PHYS.staticBox(0.5, 0.31, 0.5, V(2.35, 0.31, P.Z0 + 3.4));
 PHYS.staticBox(0.1, ROOM.H / 2, ROOM.D / 2, V(-ROOM.W / 2 - 0.1, ROOM.H / 2, 0)); PHYS.staticBox(0.1, ROOM.H / 2, ROOM.D / 2, V(ROOM.W / 2 + 0.1, ROOM.H / 2, 0));
 PHYS.staticBox(0.43, 0.3, 0.43, V(-2.0, 0.3, 1.85), new THREE.Quaternion().setFromAxisAngle(Y, Math.PI * 0.8));
 PHYS.staticBox(0.21, 0.24, 0.21, V(-1.3, 0.24, 2.25));
@@ -278,9 +285,9 @@ PHYS.staticBox(0.23, 0.28, 0.23, V(-2.45, 0.28, -2.15));
 await Promise.all(RK.map(k => new Promise((res, rej) => loader.load(`assets/${k}.glb`, g => { setProgress(k, 1); setupPiece(k, g, motions); res(); }, e => e.total && setProgress(k, e.loaded / e.total), rej))));
 
 // ════════════════════════════════════════════════════════════════════ tablets
-const tA = new Tablet('Atmosphere'), tB = new Tablet('Listening room');
+const tA = new Tablet('Atmosphere', 0.38), tB = new Tablet('Listening room', 0.38);
 const tabletWall = new THREE.Group(); tabletWall.position.set(ROOM.W / 2 - 0.003, 0, 1.55); tabletWall.rotation.y = -Math.PI / 2; scene.add(tabletWall);
-tA.group.position.set(-0.17, 1.32, 0); tB.group.position.set(0.17, 1.32, 0); tabletWall.add(tA.group, tB.group);
+tA.group.position.set(-0.215, 1.36, 0); tB.group.position.set(0.215, 1.36, 0); tabletWall.add(tA.group, tB.group);
 const tablets = [tA, tB];
 const fmtH = h => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`;
 const presets = [['Dawn', 6.6], ['Day', 12.5], ['Golden', 18.0], ['Night', 22.0]];
@@ -298,7 +305,7 @@ tB.button('reset', 776, 540, 356, 104, 'Reset room', { small: true });
 tB.text((g, s, W, H) => { g.fillStyle = 'rgba(237,232,224,0.5)'; g.font = '400 22px "Helvetica Neue", Arial'; g.textAlign = 'left';
   g.fillText('Grip: grab doors, drawers, records and ceramics · grip a cabinet to move it', 48, H - 112);
   g.fillText('Trigger: point to open / close or to pull a record to your hand · press a turntable to play', 48, H - 78);
-  g.fillText('Left stick walks · right stick turns', 48, H - 44); });
+  g.fillText('Left stick walks · right stick turns · the glass doors open onto the garden patio', 48, H - 44); });
 
 function uiAction(id, v) {
   if (id.startsWith('tod')) S.hourTarget = presets[+id.slice(3)][1];
@@ -309,8 +316,8 @@ function uiAction(id, v) {
   else if (id === 'floor') { S.floor = Math.round((v * 0.6 - 0.3) * 100) / 100; rig.position.y = S.floor; }
   else if (id.startsWith('rec')) togglePlay(RK[+id.slice(3)]);
   else if (id === 'vol') { S.volume = v; if (music && S.playing) music.out[S.playing].gain.setTargetAtTime(v, music.ctx.currentTime, 0.05); }
-  else if (id === 'openall') movers.forEach(m => (m.target = 1, m.anim = true));
-  else if (id === 'closeall') movers.forEach(m => (m.target = 0, m.anim = true));
+  else if (id === 'openall') movers.forEach(m => !m.door && (m.target = 1, m.anim = true));
+  else if (id === 'closeall') movers.forEach(m => !m.door && (m.target = 0, m.anim = true));
   else if (id === 'reset') resetRoom();
   shadowDirty = true;
   tablets.forEach(t => t.draw(S));
@@ -490,18 +497,41 @@ function lighting(dt) {
   windowFill.intensity = 0.1 + 1.9 * day; windowFill.color.copy(C('#FFF4E6')).lerp(C('#FFD2A8'), low * day * 0.6);
   scene.environmentIntensity = 0.1 + 0.2 * day;
   hemi.intensity = 0.1 + 0.18 * day;
-  R.glassM.emissive.copy(C('#18213A')).lerp(C('#F1F4F6'), day).lerp(C('#FFD9B0'), low * day * 0.55); R.glassM.emissiveIntensity = 0.3 + 0.75 * day;
+  P.frostM.emissiveIntensity = 1.05;
+  P.sky.uniforms.top.value.copy(C('#0B1426')).lerp(C('#6F92B8'), day).lerp(C('#C7A27F'), low * day * 0.5);
+  P.sky.uniforms.hor.value.copy(C('#1C2436')).lerp(C('#E9ECEA'), day).lerp(C('#F4C79A'), low * day * 0.8);
+  for (const u of P.uplights) { const n = smooth(0.3, 0.8, night); u.material.color.copy(C('#000')).lerp(C('#FFE0B0'), n); u.userData.glow.opacity = 0.35 * n; }
+  P.outsideM.emissiveIntensity = 0.5 * night * S.dimmer;          // at night the room glows through the etched glass
   R.sheerM.emissiveIntensity = 0.04 + 0.32 * day;
   scene.background.copy(C('#1A1B20')).lerp(C('#D8D2C8'), day);
   for (const k of RK) { const sp = spots[k]; if (sp) sp.intensity = S.gallery ? (10 + 24 * night) * (0.25 + 0.75 * S.dimmer) : 0; }
   R.cove.emissiveIntensity = (0.5 + 1.2 * night) * (0.35 + 0.65 * S.dimmer);
   R.bulb.intensity = 2.4 * night * S.dimmer; R.shadeM.emissiveIntensity = 0.1 + 0.9 * night * S.dimmer;
-  R.ceilM.emissiveIntensity = 0.05 + 0.14 * day + 0.06 * night * S.dimmer;
+  R.ceilM.emissiveIntensity = 0.035 * night * S.dimmer;                         // only the cove's bounce; daylight comes from the lights
+  R.ringM.emissiveIntensity = S.dimmer * (0.5 + 2.2 * night); R.haloLight.intensity = S.dimmer * (0.3 + 2.6 * night);
+  for (const k of RK) { const bp = pieces[k]?.bp; if (!bp) continue; const on = S.gallery ? 0.3 + 0.7 * S.dimmer : 0; bp.washM.opacity = on * (0.06 + 0.3 * night); bp.lensM.emissiveIntensity = on * 2.2; }
   renderer.toneMappingExposure = 1.0 + 0.08 * night;
   dust.material.opacity += ((0.12 + 0.2 * day * (1 - low * 0.5)) - dust.material.opacity) * Math.min(1, dt * 2);
-  if (!lastSun || lastSun.distanceToSquared(dir) > 1e-7) { shadowDirty = true; lastSun = dir.clone(); }
+  if (!lastSun || lastSun.distanceToSquared(dir) > 1e-7) { shadowDirty = true; lastSun = dir.clone(); frostDirty = true; }
 }
-let lastSun = null;
+let lastSun = null, frostDirty = true, frostT = 0;
+
+// room bounds; with the French doors open you can step out onto the patio
+const doorMovers = [];
+function walkLimit(p) {
+  const q = p.clone(), m = 0.3, open = doorMovers.length && doorMovers.every(d => d.t > 0.55), hz = ROOM.D / 2;
+  if (q.z > hz - m && open && Math.abs(q.x) < P.dg - 0.25) { q.z = Math.min(q.z, P.Z0 + P.PD - 0.55); if (q.z > hz + 0.25) q.x = clamp(q.x, -P.PX + 0.35, P.PX - 0.35); return q; }
+  // already outside: stay on the patio
+  if (q.z > hz + 0.25) { q.x = clamp(q.x, -P.PX + 0.35, P.PX - 0.35); q.z = clamp(q.z, P.Z0 + 0.25, P.Z0 + P.PD - 0.55); return q; }
+  q.x = clamp(q.x, -ROOM.W / 2 + m, ROOM.W / 2 - m); q.z = clamp(q.z, -hz + m, hz - m); return q;
+}
+// patio doors are movers like the furniture doors (grab the handles, or point and click)
+for (const d of P.doors) {
+  const mv = { piece: 'room', door: true, node: d.node, t: 0, target: 0, p0: d.node.position.clone(), q0: d.node.quaternion.clone(), p1: d.node.position.clone(), q1: d.q1, name: d.name, meshes: d.meshes };
+  for (const m of d.meshes) { m.userData.mover = mv; hitTargets.push(m); }
+  const f = new PHYS.Follower(d.node); f.box(new THREE.Box3(V(Math.min(0, -d.node.position.x) - 0.0, 0.04, -0.03), V(Math.max(0, -d.node.position.x), 2.18, 0.03))); followers.push(f);
+  movers.push(mv); doorMovers.push(mv);
+}
 
 // ════════════════════════════════════════════════════════════════════ frame loop
 const clock = new THREE.Timer(); const snapReady = [true, true]; let uiTick = 0;
@@ -577,15 +607,13 @@ function frame() {
         }
       }
     }
-    const cw = camera.getWorldPosition(V()), lx = ROOM.W / 2 - 0.3, lz = ROOM.D / 2 - 0.3;
-    if (Math.abs(cw.x) > lx) rig.position.x -= cw.x - Math.sign(cw.x) * lx;
-    if (Math.abs(cw.z) > lz) rig.position.z -= cw.z - Math.sign(cw.z) * lz;
+    const cw = camera.getWorldPosition(V()), lim = walkLimit(cw); rig.position.x += lim.x - cw.x; rig.position.z += lim.z - cw.z;
   } else {
     camera.rotation.set(pitch, yaw, 0, 'YXZ');
     const f = V(-Math.sin(yaw), 0, -Math.cos(yaw)), rgt = V(Math.cos(yaw), 0, -Math.sin(yaw)), sp = 1.8 * dt;
     if (keys.KeyW || keys.ArrowUp) rig.position.addScaledVector(f, sp); if (keys.KeyS || keys.ArrowDown) rig.position.addScaledVector(f, -sp);
     if (keys.KeyA || keys.ArrowLeft) rig.position.addScaledVector(rgt, -sp); if (keys.KeyD || keys.ArrowRight) rig.position.addScaledVector(rgt, sp);
-    rig.position.x = clamp(rig.position.x, -ROOM.W / 2 + 0.3, ROOM.W / 2 - 0.3); rig.position.z = clamp(rig.position.z, -ROOM.D / 2 + 0.3, ROOM.D / 2 - 0.3);
+    { const lim = walkLimit(rig.position); rig.position.x = lim.x; rig.position.z = lim.z; }
     if (deskHeld) { camera.updateMatrixWorld(); const p = V(0.1, -0.12, -0.45).applyMatrix4(camera.matrixWorld), q = camera.getWorldQuaternion(new THREE.Quaternion()); deskHeld.phys.moveTo(p, q); deskHeld.mesh.position.copy(p); deskHeld.mesh.quaternion.copy(q); shadowDirty = true; }
   }
   // physics: furniture follows its meshes, records and ceramics follow their bodies
@@ -600,6 +628,7 @@ function frame() {
   }
   if ((uiTick += dt) > 1) { uiTick = 0; S.clock = fmtH(S.hour); tablets.forEach(t => t.draw(S)); }
   if (shadowDirty) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
+  if (frostDirty && (frostT += dt) > 0.8) { frostDirty = false; frostT = 0; P.capture(renderer); }
   renderer.render(scene, camera);
 }
 S.clock = fmtH(S.hour); tablets.forEach(t => t.draw(S));
@@ -614,4 +643,4 @@ const vrb = VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'
 vrb.id = 'vrbtn'; $('#enter').appendChild(vrb);
 renderer.xr.addEventListener('sessionstart', () => { ensureAudio(); camera.position.set(0, 0, 0); $('#hud').classList.add('hidden'); revealed = false; reveal(); });
 renderer.xr.addEventListener('sessionend', () => { camera.position.set(0, 1.62, 0); $('#hud').classList.remove('hidden'); });
-window.APP = { scene, renderer, camera, rig, pieces, movers, lpUnits, loose, S, uiAction, togglePlay, tablets, pick, raycaster, deskClick, PHYS, setView(x, z, y, p) { rig.position.set(x, S.floor, z); yaw = y; pitch = p ?? pitch; } };
+window.APP = { P, scene, renderer, camera, rig, pieces, movers, lpUnits, loose, S, uiAction, togglePlay, tablets, pick, raycaster, deskClick, PHYS, setView(x, z, y, p) { rig.position.set(x, S.floor, z); yaw = y; pitch = p ?? pitch; } };
