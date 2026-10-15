@@ -8,7 +8,7 @@ Works on a desktop browser too (drag to look, WASD to walk, click to interact).
 
 ## In the room
 - One wall per piece, a reading corner, a halo pendant and two wall tablets.
-- Steel-framed frosted glazing with French doors: open them (grab a handle or point and click) and walk out onto the garden patio.
+- Steel-framed reeded glass with French doors onto a garden patio: the glass shows the real patio behind it, blurred, from each eye's position, so it has depth as you move.
 - Furniture is at true 1:1 scale. If the room feels too big or small, use **Floor height** on the Atmosphere tablet.
 - **Grip** (or pinch) to grab: doors swing on their hinges, drawers slide, LPs come out of the racks
   and can be carried, put back or dropped (real rigid-body physics); grip a cabinet body to slide or turn the whole piece.

@@ -39,8 +39,6 @@ export function buildPatio(scene, R) {
   add(new THREE.BoxGeometry(2 * PX, 0.48, 0.32), renderM, 0, 0.24, Z0 + PD - 0.16);
   const lowHedge = add(new RoundedBoxGeometry(2 * PX - 0.1, 0.42, 0.3, 3, 0.1), hedgeM, 0, 0.66, Z0 + PD - 0.16);
 
-  // facade above the glazing: slim roof slab with a shadow-casting overhang
-  const roof = add(new THREE.BoxGeometry(ROOM.W + 0.6, 0.22, 0.9), renderM, 0, ROOM.H + 0.11, HZ + 0.35);   // hidden from the frost capture (its dark underside would band the transom)
 
   // two olive trees in large concrete planters
   const planterM = new THREE.MeshStandardMaterial({ color: '#B4AA9A', roughness: 0.85 });
@@ -83,7 +81,7 @@ export function buildPatio(scene, R) {
   // one draw call per material for all the static patio geometry (keeps the Quest's draw-call budget)
   out.updateMatrixWorld(true);
   const byMat = new Map(), drop = [];
-  out.traverse(o => { if (!o.isMesh || o === roof || o.material.isMeshBasicMaterial) return; const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k); g.applyMatrix4(o.matrixWorld); if (!byMat.has(o.material)) byMat.set(o.material, []); byMat.get(o.material).push(g); drop.push(o); });
+  out.traverse(o => { if (!o.isMesh || o.material.isMeshBasicMaterial) return; const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k); g.applyMatrix4(o.matrixWorld); if (!byMat.has(o.material)) byMat.set(o.material, []); byMat.get(o.material).push(g); drop.push(o); });
   for (const o of drop) o.parent.remove(o);
   for (const [mat, list] of byMat) { const m = new THREE.Mesh(mergeGeometries(list), mat); m.castShadow = m.receiveShadow = true; out.add(m); }
   for (const c of [...out.children]) if (c.isGroup && !c.children.length) out.remove(c);
@@ -96,75 +94,83 @@ export function buildPatio(scene, R) {
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), skyM); sky.position.set(0, 0, HZ); scene.add(sky);
 
-  // ── glazing: fixed sidelights + transom, two door leaves; all share one frosted material
-  const frostCanvas = document.createElement('canvas'); frostCanvas.width = 512; frostCanvas.height = Math.round(512 * gh / (2 * gx));
-  const fg = frostCanvas.getContext('2d'); fg.fillStyle = '#EDEFEC'; fg.fillRect(0, 0, frostCanvas.width, frostCanvas.height);
-  const frostTex = new THREE.CanvasTexture(frostCanvas); frostTex.colorSpace = THREE.SRGBColorSpace;
-  const grain = document.createElement('canvas'); grain.width = frostCanvas.width; grain.height = frostCanvas.height;
-  { const g = grain.getContext('2d'), r = rng(13); for (let i = 0; i < 22000; i++) { g.fillStyle = `rgba(255,255,255,${r() * 0.07})`; g.fillRect(r() * grain.width, r() * grain.height, 1, 1); } }
-  const frostM = new THREE.MeshStandardMaterial({ color: '#000', emissive: new THREE.Color('#FFFFFF'), emissiveMap: frostTex, emissiveIntensity: 1, roughness: 0.15 });
-  const outsideM = new THREE.MeshStandardMaterial({ color: '#C9CDCB', roughness: 0.22, metalness: 0.1, emissive: new THREE.Color('#FFE6C8'), emissiveIntensity: 0 });
+  // ── glazing: reeded, acid-etched glass with a live view of the patio behind it.
+  // The patio lives on its own layer, so only the glass sees it: it is rendered from each eye's real position
+  // into a small target every frame, then the shader blurs it (mip bias) and refracts it through 26 mm flutes.
+  // Moving your head shifts what is behind the glass, with real depth.
+  out.traverse(o => o.layers.set(5)); sky.layers.set(5);
+  const mkRT = () => new THREE.WebGLRenderTarget(512, Math.round(512 * gh / (2 * gx)), { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+  const rtL = mkRT(), rtR = mkRT();
+  const glassM = new THREE.ShaderMaterial({
+    uniforms: { tL: { value: rtL.texture }, tR: { value: rtR.texture }, vpL: { value: new THREE.Matrix4() }, vpR: { value: new THREE.Matrix4() },
+      eyeL: { value: new THREE.Vector3() }, eyeR: { value: new THREE.Vector3(0, -100, 0) }, bright: { value: 1 }, haze: { value: 0.36 }, milk: { value: new THREE.Color('#E9EAE6') } },
+    vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `
+      uniform sampler2D tL, tR; uniform mat4 vpL, vpR; uniform vec3 eyeL, eyeR, milk; uniform float bright, haze; varying vec3 vW;
+      void main(){
+        bool left = distance(cameraPosition, eyeL) <= distance(cameraPosition, eyeR);
+        vec4 c = (left ? vpL : vpR) * vec4(vW, 1.0);
+        vec2 uv = c.xy / c.w * 0.5 + 0.5;
+        float rx = vW.x / 0.026, f = fract(rx) - 0.5;
+        float k = 1.0 - smoothstep(0.12, 0.4, fwidth(rx));       // fade the reeds out where they get smaller than a few pixels (no moire)
+        uv.x += f * 0.03 * k;                                     // each reed is a small cylindrical lens
+        vec3 col = left ? textureLod(tL, uv, 3.3).rgb : textureLod(tR, uv, 3.3).rgb;   // fixed blur level: always frosted, no seams
+        col = mix(col, milk * (0.35 + 0.65 * dot(col, vec3(0.33))), haze);   // etched haze lifts and softens
+        col *= 1.0 + k * 0.1 * (cos(f * 6.2832) - 0.4);                   // crest highlight, valley shade
+        gl_FragColor = vec4(col * bright, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
   const zg = HZ + 0.04;
-  // a pane between world x0..x1, y0..y1 at the glazing plane; uv = position in the glazing as seen from inside
-  const pane = (x0, x1, y0, y1, origin = new THREE.Vector3()) => {
-    // separate vertices per face (shared ones would average the two normals to zero and render black)
+  const pane = (x0, x1, y0, y1) => {
     const geo = new THREE.BufferGeometry(), P = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
-    const pos = P.flatMap(([x, y]) => [x - origin.x, y - origin.y, zg - origin.z]), uv = P.flatMap(([x, y]) => [(gx - x) / (2 * gx), y / gh]);
-    geo.setAttribute('position', new THREE.Float32BufferAttribute([...pos, ...pos], 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute([...uv, ...uv], 2));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute([...Array(4).fill([0, 0, -1]).flat(), ...Array(4).fill([0, 0, 1]).flat()], 3));
-    geo.setIndex([0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7]); geo.addGroup(0, 6, 0); geo.addGroup(6, 6, 1);
-    return new THREE.Mesh(geo, [frostM, outsideM]);
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P.flatMap(([x, y]) => [x, y, zg]), 3));
+    geo.setIndex([0, 2, 1, 0, 3, 2]);
+    return new THREE.Mesh(geo, glassM);
   };
-  const dg = gx / 2, fixed = new THREE.Group(); scene.add(fixed);
-  fixed.add(pane(-gx, -dg, 0.04, gh - 0.05), pane(dg, gx, 0.04, gh - 0.05), pane(-dg, dg, 2.2, gh - 0.05));
-  // a glossy skin on the room side picks up interior reflections like real glass
+  const dg = gx / 2, glazing = new THREE.Group(); scene.add(glazing);
+  glazing.add(pane(-gx, -dg, 0.04, gh - 0.05), pane(dg, gx, 0.04, gh - 0.05), pane(-dg, dg, 2.2, gh - 0.05), pane(-dg + 0.025, -0.012, 0.06, 2.17), pane(0.012, dg - 0.025, 0.06, 2.17));
+  // a glossy skin picks up the room's reflections like real glass
   const sheen = new THREE.Mesh(new THREE.PlaneGeometry(2 * gx, gh), new THREE.MeshPhysicalMaterial({ color: '#FFFFFF', roughness: 0.04, transparent: true, opacity: 0.07, depthWrite: false }));
-  sheen.position.set(0, gh / 2, HZ + 0.034); sheen.rotation.y = Math.PI;
+  sheen.position.set(0, gh / 2, HZ + 0.034); sheen.rotation.y = Math.PI; scene.add(sheen);
 
+  // French door leaves (fixed): slim steel frames, mid rail, long bronze pulls
   const bronze = new THREE.MeshStandardMaterial({ color: '#6E5A43', metalness: 0.9, roughness: 0.28 });
-  const doors = [];
-  for (const s of [-1, 1]) {                       // s = -1 left leaf (hinge at -dg), +1 right leaf (hinge at +dg)
-    const hingeX = s * dg, leaf = new THREE.Group(); leaf.position.set(hingeX, 0, zg); scene.add(leaf);
-    const o = new THREE.Vector3(hingeX, 0, zg), xa = Math.min(hingeX, 0), xb = Math.max(hingeX, 0);
-    const meshes = [pane(xa + (s < 0 ? 0.025 : 0.012), xb - (s < 0 ? 0.012 : 0.025), 0.06, 2.17, o)];
-    const fb = (w, h, x, y) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), steel); m.position.set(x - hingeX, y, 0); m.castShadow = true; leaf.add(m); meshes.push(m); };
+  for (const s of [-1, 1]) {
+    const xa = s < 0 ? -dg : 0, xb = s < 0 ? 0 : dg;
+    const fb = (w, h, x, y) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), steel); m.position.set(x, y, zg); m.castShadow = true; glazing.add(m); };
     fb(0.04, 2.13, xa + 0.02, 1.105); fb(0.04, 2.13, xb - 0.02, 1.105); fb(xb - xa, 0.045, (xa + xb) / 2, 0.0625); fb(xb - xa, 0.04, (xa + xb) / 2, 2.155); fb(xb - xa, 0.03, (xa + xb) / 2, 0.92);
-    // long pull handles on both faces, at the meeting stiles
-        for (const side of [-1, 1]) {
-      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.62, 20), bronze); bar.position.set((s < 0 ? xb - 0.07 : xa + 0.07) - hingeX, 1.05, side * 0.075); bar.castShadow = true; leaf.add(bar); meshes.push(bar);
-      for (const dy of [-0.24, 0.24]) { const st = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.05, 12), bronze); st.rotation.x = Math.PI / 2; st.position.set(bar.position.x, 1.05 + dy, side * 0.05); leaf.add(st); }
+    const hx = s < 0 ? xb - 0.07 : xa + 0.07;
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.62, 20), bronze); bar.position.set(hx, 1.05, zg - 0.075); bar.castShadow = true; glazing.add(bar);
+    for (const dy of [-0.24, 0.24]) { const st = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.05, 12), bronze); st.rotation.x = Math.PI / 2; st.position.set(hx, 1.05 + dy, zg - 0.05); glazing.add(st); }
+  }
+
+  // per-frame: off-axis cameras from each eye through the glazing rectangle
+  const cam = new THREE.PerspectiveCamera(); cam.layers.set(5); cam.rotation.y = Math.PI;
+  const _e = new THREE.Vector3();
+  function view(renderer, eye, rt, vp) {
+    _e.copy(eye); _e.z = Math.min(_e.z, zg - 0.08);
+    const d = zg - _e.z;
+    cam.position.copy(_e); cam.updateMatrixWorld();
+    cam.projectionMatrix.makePerspective(_e.x - gx, _e.x + gx, gh - _e.y, -_e.y, d, 80); cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+    vp.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    renderer.setRenderTarget(rt); renderer.render(scene, cam);
+  }
+  function update(renderer, camera) {
+    const xr = renderer.xr, presenting = xr.isPresenting, prevT = renderer.getRenderTarget(), shadow = renderer.shadowMap.needsUpdate;
+    renderer.shadowMap.needsUpdate = false; xr.enabled = false;
+    const U = glassM.uniforms;
+    if (presenting) {
+      const cams = xr.getCamera().cameras;
+      U.eyeL.value.setFromMatrixPosition(cams[0].matrixWorld); U.eyeR.value.setFromMatrixPosition(cams[1].matrixWorld);
+      view(renderer, U.eyeL.value, rtL, U.vpL.value); view(renderer, U.eyeR.value, rtR, U.vpR.value);
+    } else {
+      camera.getWorldPosition(U.eyeL.value); U.eyeR.value.set(0, -100, 0);
+      view(renderer, U.eyeL.value, rtL, U.vpL.value);
     }
-    leaf.add(meshes[0]);
-    doors.push({ node: leaf, q1: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s * 1.75), meshes, name: s < 0 ? 'Patio door L' : 'Patio door R' });
-  }
-  scene.add(sheen);
-
-  // ── blurred live capture of the patio for the frosted glass
-  const capW = 256, capH = Math.round(capW * gh / (2 * gx));
-  const rt = new THREE.WebGLRenderTarget(capW, capH); rt.texture.colorSpace = THREE.SRGBColorSpace;
-  const dist = 1.3, cam = new THREE.PerspectiveCamera(2 * Math.atan((gh / 2) / (dist + 0.04)) * 180 / Math.PI, (2 * gx) / gh, dist + 0.06, 80);
-  cam.position.set(0, gh / 2, HZ - dist); cam.lookAt(0, gh / 2, HZ + 10);
-  const buf = new Uint8Array(capW * capH * 4), small = document.createElement('canvas'); small.width = capW; small.height = capH;
-  const sg = small.getContext('2d'), img = sg.createImageData(capW, capH);
-  const hasFilter = 'filter' in fg;
-  function capture(renderer) {
-    const xr = renderer.xr.enabled, prevT = renderer.getRenderTarget();
-    const vis = doors.map(d => d.node.visible); doors.forEach(d => (d.node.visible = false)); fixed.visible = false; sheen.visible = false; roof.visible = false;
-    renderer.xr.enabled = false; renderer.setRenderTarget(rt); renderer.render(scene, cam); renderer.readRenderTargetPixels(rt, 0, 0, capW, capH, buf);
-    renderer.setRenderTarget(prevT); renderer.xr.enabled = xr;
-    doors.forEach((d, i) => (d.node.visible = vis[i])); fixed.visible = true; sheen.visible = true; roof.visible = true;
-    for (let y = 0; y < capH; y++) img.data.set(buf.subarray((capH - 1 - y) * capW * 4, (capH - y) * capW * 4), y * capW * 4);
-    sg.putImageData(img, 0, 0);
-    const W = frostCanvas.width, H = frostCanvas.height;
-    fg.save(); fg.globalAlpha = 1;
-    if (hasFilter) { fg.filter = 'blur(7px)'; fg.drawImage(small, -15, -15, W + 30, H + 30); fg.filter = 'none'; }
-    else { const t = document.createElement('canvas'); t.width = 48; t.height = Math.round(48 * H / W); t.getContext('2d').drawImage(small, 0, 0, t.width, t.height); fg.imageSmoothingQuality = 'high'; fg.drawImage(t, 0, 0, W, H); }
-    // the etched surface scatters: lift the blacks, add a soft vertical light gradient and the grain
-    fg.globalCompositeOperation = 'screen'; const lg = fg.createLinearGradient(0, 0, 0, H); lg.addColorStop(0, 'rgba(70,70,70,1)'); lg.addColorStop(1, 'rgba(30,30,30,1)'); fg.fillStyle = lg; fg.fillRect(0, 0, W, H);
-    fg.globalCompositeOperation = 'source-over'; fg.drawImage(grain, 0, 0); fg.restore();
-    frostTex.needsUpdate = true;
+    renderer.setRenderTarget(prevT); xr.enabled = true; renderer.shadowMap.needsUpdate = shadow;
   }
 
-  return { out, sky: skyM, doors, frostM, outsideM, capture, frostCanvas, small, uplights, PX, PD, Z0, dg };
+  return { out, sky: skyM, glassM, update, uplights, dg };
 }

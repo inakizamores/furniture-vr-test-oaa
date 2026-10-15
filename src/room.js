@@ -236,6 +236,46 @@ export function buildRoom(scene) {
   const det = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.03, 40), plateM); det.position.set(1.2, ROOM.H - 0.015, 0.3); room.add(det);
   const led = new THREE.Mesh(new THREE.CircleGeometry(0.003, 12), new THREE.MeshBasicMaterial({ color: '#7CFF9A' })); led.rotation.x = Math.PI / 2; led.position.set(1.22, ROOM.H - 0.0305, 0.3); room.add(led);
 
+  // ── oak pivot door to the rest of the house (right wall, back corner): flush in a shadow-gap frame, long bronze pull
+  {
+    const oakT = canvasTex(256, 1024, (g, W, H) => { const r = rng(61); g.fillStyle = '#A88A68'; g.fillRect(0, 0, W, H); for (let k = 0; k < 260; k++) { const x = r() * W, a = 0.04 + r() * 0.1; g.strokeStyle = r() < 0.6 ? `rgba(90,62,40,${a})` : `rgba(210,180,140,${a})`; g.lineWidth = 0.6 + r() * 1.8; g.beginPath(); g.moveTo(x, 0); for (let y = 0; y <= H; y += 32) g.lineTo(x + Math.sin(y / 140 + k) * (2 + r() * 3), y); g.stroke(); } });
+    const oakM = new THREE.MeshStandardMaterial({ color: '#C7B096', map: oakT, roughness: 0.55 });
+    const dz = -2.12, dw = 0.96, dh = 2.42;
+    box(0.02, dh + 0.016, dw + 0.016, gap, HX - 0.009, (dh + 0.016) / 2, dz, 1, false);            // shadow-gap reveal
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.045, dh, dw), [oakM, oakM, oakM, oakM, oakM, oakM]); leaf.position.set(HX - 0.024, dh / 2, dz); leaf.castShadow = leaf.receiveShadow = true; room.add(leaf);
+    const pullM = new THREE.MeshStandardMaterial({ color: '#6E5A43', metalness: 0.9, roughness: 0.28 });
+    const pull = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.1, 20), pullM); pull.position.set(HX - 0.085, 1.1, dz + dw / 2 - 0.09); pull.castShadow = true; room.add(pull);
+    for (const dy of [-0.45, 0.45]) { const st = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.0065, 0.04, 12), pullM); st.rotation.z = Math.PI / 2; st.position.set(HX - 0.06, 1.1 + dy, dz + dw / 2 - 0.09); room.add(st); }
+  }
+  // ── linear floor convector in front of the glazing (dark bronze slatted grille, flush with the oak)
+  {
+    const grilleT = canvasTex(512, 32, (g, W, H) => { g.fillStyle = '#121110'; g.fillRect(0, 0, W, H); g.fillStyle = '#4A4036'; for (let x = 0; x < W; x += 8) g.fillRect(x, 0, 4, H); }, true);
+    grilleT.repeat.set(2 * gx / 0.5, 1);
+    const gr = new THREE.Mesh(new THREE.PlaneGeometry(2 * gx + 0.3, 0.2), new THREE.MeshStandardMaterial({ map: grilleT, metalness: 0.6, roughness: 0.45 }));
+    gr.rotation.x = -Math.PI / 2; gr.position.set(0, 0.0015, HZ - 0.38); gr.receiveShadow = true; room.add(gr);
+    const rim = new THREE.Mesh(new THREE.PlaneGeometry(2 * gx + 0.32, 0.22), new THREE.MeshStandardMaterial({ color: '#2A2420', roughness: 0.5 })); rim.rotation.x = -Math.PI / 2; rim.position.set(0, 0.001, HZ - 0.38); room.add(rim);
+  }
+  // ── reading corner: art books + a small stone object on the side table, a wool throw over the chair arm
+  {
+    const books = [['#2F2B27', 0.24, 0.31, 0.032], ['#B9A88E', 0.22, 0.28, 0.026], ['#7A3F2B', 0.2, 0.26, 0.022]];
+    let y = 0.48;
+    books.forEach(([c, w, d, h], i) => { const b = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, 0.003), new THREE.MeshStandardMaterial({ color: c, roughness: 0.75 })); b.position.set(-1.3 + (i - 1) * 0.008, y + h / 2, 2.25 + (i - 1) * 0.01); b.rotation.y = 0.35 + i * 0.12; b.castShadow = b.receiveShadow = true; room.add(b); y += h; });
+    const pebble = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 16), new THREE.MeshStandardMaterial({ color: '#3B3835', roughness: 0.35 })); pebble.scale.set(1.3, 0.55, 1); pebble.position.set(-1.25, y + 0.022, 2.24); pebble.castShadow = true; room.add(pebble);
+    // draped over the right arm: inside face down to the seat, over the top, outside face down the side
+    const path = [[0.27, 0.43], [0.275, 0.62], [0.3, 0.665], [0.355, 0.675], [0.41, 0.665], [0.435, 0.62], [0.44, 0.22]].map(([x, y]) => new THREE.Vector2(x, y));
+    const curve = new THREE.SplineCurve(path), throwGeo = new THREE.PlaneGeometry(1, 0.42, 40, 10), tp = throwGeo.attributes.position;
+    for (let i = 0; i < tp.count; i++) { const u = tp.getX(i) + 0.5, z = tp.getY(i), p = curve.getPoint(u); tp.setXYZ(i, p.x + 0.004 * Math.sin(z * 50 + u * 9), p.y, z + 0.05 + 0.01 * Math.sin(u * 14)); }
+    throwGeo.computeVertexNormals();
+    const wool = canvasTex(128, 128, (g, W) => { const r = rng(71); g.fillStyle = '#B8A184'; g.fillRect(0, 0, W, W); for (let k = 0; k < W; k += 4) { g.fillStyle = `rgba(60,45,30,${0.1 + r() * 0.08})`; g.fillRect(0, k, W, 1.5); g.fillRect(k, 0, 1.2, W); } });
+    wool.repeat.set(3, 6);
+    const thr = new THREE.Mesh(throwGeo, new THREE.MeshStandardMaterial({ color: '#E6D3B8', map: wool, roughness: 1, side: THREE.DoubleSide }));
+    const arm = new THREE.Group(); arm.position.set(-2.0, 0, 1.85); arm.rotation.y = Math.PI * 0.8; room.add(arm);
+    thr.castShadow = thr.receiveShadow = true; arm.add(thr);
+  }
+  // thermostat next to the light switch
+  { const th = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.038, 0.018, 48), new THREE.MeshStandardMaterial({ color: '#2B2A28', metalness: 0.5, roughness: 0.35 })); th.rotation.z = Math.PI / 2; th.position.set(-HX + 0.009, 1.38, 2.25); room.add(th);
+    const face = new THREE.Mesh(new THREE.CircleGeometry(0.03, 40), new THREE.MeshBasicMaterial({ color: '#E9B87A' })); face.rotation.y = Math.PI / 2; face.position.set(-HX + 0.0185, 1.38, 2.25); face.scale.setScalar(0.25); room.add(face); }
+
   // ── minimalist halo pendant over the rug: thin bronze ring, opal light band, three hair-thin cables
   const halo = new THREE.Group(), hr = 0.5, hy = 2.5;
   const bronze = new THREE.MeshStandardMaterial({ color: '#3B342C', metalness: 0.85, roughness: 0.35 });
