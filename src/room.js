@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
-export const ROOM = { W: 6.4, D: 6.0, H: 3.1 };          // x, z, y (metres)
+export const ROOM = { W: 6.0, D: 5.6, H: 2.9 };          // x, z, y (metres)
 const HX = ROOM.W / 2, HZ = ROOM.D / 2;
 
 // ── small procedural texture kit
@@ -65,10 +65,10 @@ function floorMaterial() {
     }
   });
   const nrm = normalFromCanvas(hc, 3);
-  const rough = canvasTex(256, 256, (g) => { const r2 = rng(5); for (let i = 0; i < 4000; i++) { const v = 120 + r2() * 60; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(r2() * 256, r2() * 256, 2, 8); } }, false);
+  const rough = canvasTex(256, 256, (g) => { const r2 = rng(5); g.fillStyle = 'rgb(200,200,200)'; g.fillRect(0, 0, 256, 256); for (let i = 0; i < 4000; i++) { const v = 170 + r2() * 60; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(r2() * 256, r2() * 256, 2, 8); } }, false);
   for (const t of [map, nrm]) t.repeat.set(ROOM.W / 2.4, ROOM.D / 2.4);
   rough.repeat.set(8, 8);
-  return new THREE.MeshStandardMaterial({ map, normalMap: nrm, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.48, roughnessMap: rough, metalness: 0 });
+  return new THREE.MeshStandardMaterial({ map, normalMap: nrm, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.62, roughnessMap: rough, metalness: 0 });   // satin oiled oak: soft sheen, no glitter
 }
 // lime plaster, 1.2 m tile
 function plasterMaterial(color) {
@@ -146,7 +146,7 @@ export function buildRoom(scene) {
   box(ROOM.W + 2 * T, ROOM.H, T, walls, 0, ROOM.H / 2, -HZ - T / 2);
   box(T, ROOM.H, ROOM.D, walls, -HX - T / 2, ROOM.H / 2, 0);
   box(T, ROOM.H, ROOM.D, walls, HX + T / 2, ROOM.H / 2, 0);
-  const gx = 2.0, gh = 2.6;
+  const gx = 1.9, gh = 2.5;
   box(HX - gx, ROOM.H, T, walls, -(HX + gx) / 2, ROOM.H / 2, HZ + T / 2);
   box(HX - gx, ROOM.H, T, walls, (HX + gx) / 2, ROOM.H / 2, HZ + T / 2);
   box(2 * gx, ROOM.H - gh, T, walls, 0, (ROOM.H + gh) / 2, HZ + T / 2);
@@ -156,8 +156,27 @@ export function buildRoom(scene) {
   // steel glazing: mullions every 1.15 m, transom at 2.2
   for (let i = 0; i <= 4; i++) box(0.05, gh, 0.08, steel, -gx + i * (2 * gx / 4), gh / 2, HZ + 0.02, 1);
   box(2 * gx, 0.05, 0.08, steel, 0, gh - 0.025, HZ + 0.02, 1); box(2 * gx, 0.05, 0.08, steel, 0, 2.2, HZ + 0.02, 1); box(2 * gx, 0.04, 0.08, steel, 0, 0.02, HZ + 0.02, 1);
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2 * gx, gh), new THREE.MeshStandardMaterial({ color: '#C9D6DA', transparent: true, opacity: 0.08, roughness: 0.02, metalness: 0.0, depthWrite: false }));
-  glass.position.set(0, gh / 2, HZ + 0.03); glass.rotation.y = Math.PI; room.add(glass);
+  // acid-etched (frosted) glazing: soft daylight with the blurred shapes of a garden behind it, no sharp view to fake
+  const frostMap = canvasTex(1024, 672, (g, W, H) => {
+    const r2 = rng(13);
+    const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#FFFFFF'); sky.addColorStop(0.55, '#F3F3EF'); sky.addColorStop(1, '#DCDDD4');
+    g.fillStyle = sky; g.fillRect(0, 0, W, H);
+    const blob = (x, y, r, c, a) => { const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${c},${a})`); gr.addColorStop(1, `rgba(${c},0)`); g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r); };
+    for (let i = 0; i < 70; i++) blob(r2() * W, H * (0.42 + r2() * 0.5), 60 + r2() * 110, '120,128,104', 0.10 + r2() * 0.1);   // hedges / shrubs
+    for (const tx of [0.12, 0.83]) { for (let i = 0; i < 26; i++) blob(W * tx + (r2() - 0.5) * 220, H * (0.12 + r2() * 0.45), 50 + r2() * 90, '110,118,96', 0.08 + r2() * 0.08); blob(W * tx, H * 0.75, 30, '90,84,74', 0.25); } // two trees
+    const ter = g.createLinearGradient(0, H * 0.86, 0, H); ter.addColorStop(0, 'rgba(170,160,145,0)'); ter.addColorStop(1, 'rgba(170,160,145,0.35)'); g.fillStyle = ter; g.fillRect(0, H * 0.86, W, H * 0.14);
+    for (let i = 0; i < 90000; i++) { const v = r2() * 18; g.fillStyle = `rgba(255,255,255,${v / 255})`; g.fillRect(r2() * W, r2() * H, 1.2, 1.2); }   // etched grain
+  });
+  frostMap.wrapS = frostMap.wrapT = THREE.ClampToEdgeWrapping;
+  const glassM = new THREE.MeshStandardMaterial({ color: '#000000', emissive: new THREE.Color('#F1F2F0'), emissiveMap: frostMap, emissiveIntensity: 1.0, roughness: 0.2, metalness: 0 });
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2 * gx, gh), glassM);
+  glass.position.set(0, gh / 2, HZ + 0.04); glass.rotation.y = Math.PI; room.add(glass);
+  // a faint glossy sheet in front of the etched face: picks up room reflections like real glass
+  const sheen = new THREE.Mesh(new THREE.PlaneGeometry(2 * gx, gh), new THREE.MeshPhysicalMaterial({ color: '#FFFFFF', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.08, envMapIntensity: 1.5, depthWrite: false }));
+  sheen.position.set(0, gh / 2, HZ + 0.036); sheen.rotation.y = Math.PI; room.add(sheen);
+  // deep plaster reveals + a limestone threshold
+  const stoneM = new THREE.MeshStandardMaterial({ color: '#CFC6B8', roughness: 0.55 });
+  box(2 * gx + 0.04, 0.02, 0.12, stoneM, 0, 0.01, HZ + 0.0, 1, false);
   // ceiling: perimeter cove light (emissive strip) + three track spots
   const cove = new THREE.MeshStandardMaterial({ color: '#000', emissive: new THREE.Color('#FFD8A8'), emissiveIntensity: 0.8 });
   for (const [w, d, x, z] of [[ROOM.W - 0.3, 0.04, 0, -HZ + 0.15], [0.04, ROOM.D - 0.3, -HX + 0.15, 0], [0.04, ROOM.D - 0.3, HX - 0.15, 0]]) box(w, 0.01, d, cove, x, ROOM.H - 0.005, z, 1, false);
@@ -173,44 +192,18 @@ export function buildRoom(scene) {
     f.rotation.set(-Math.PI / 2, 0, ry); f.position.copy(pos).add(new THREE.Vector3(Math.sin(ry) * 0.2, 0.003, Math.cos(ry) * 0.2)); room.add(f);
   }
   // outside: terrace + garden + sky dome
-  const stone = canvasTex(1024, 1024, (g, W) => {
-    const r2 = rng(19); g.fillStyle = '#A9A194'; g.fillRect(0, 0, W, W);
-    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { const v = 0.92 + r2() * 0.14; g.fillStyle = `rgb(${169 * v},${161 * v},${148 * v})`; g.fillRect(i * W / 4 + 3, j * W / 4 + 3, W / 4 - 6, W / 4 - 6); }
-    for (let i = 0; i < 9000; i++) { g.fillStyle = `rgba(${r2() < 0.5 ? 80 : 210},${r2() < 0.5 ? 75 : 200},70,${r2() * 0.12})`; g.fillRect(r2() * W, r2() * W, 2, 2); }
-  });
-  stone.repeat.set(30 / 2.4, 9 / 2.4);
-  const terrace = new THREE.Mesh(new THREE.PlaneGeometry(30, 9), new THREE.MeshStandardMaterial({ map: stone, roughness: 0.85 }));
-  terrace.rotation.x = -Math.PI / 2; terrace.position.set(0, -0.02, HZ + 4.6); terrace.receiveShadow = true; room.add(terrace);
-  const hedge = new THREE.Mesh(new RoundedBoxGeometry(30, 0.9, 0.7, 3, 0.25), new THREE.MeshStandardMaterial({ color: '#3F4A2E', roughness: 1 }));
-  hedge.position.set(0, 0.45, HZ + 8.6); hedge.castShadow = true; room.add(hedge);
-  const lawn = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: '#56623F', roughness: 1 }));
-  lawn.rotation.x = -Math.PI / 2; lawn.position.set(0, -0.05, HZ + 209); room.add(lawn);
-  // painted landscape: layered hills, a soft tree line, meadow (alpha above the horizon so the sky shows)
-  const land = canvasTex(4096, 1024, (g, W, H) => {
-    const r2 = rng(41);
-    const ridge = (base, amp, fq, col, seed) => { const rr = rng(seed); const ph = [rr() * 6, rr() * 6, rr() * 6]; g.fillStyle = col; g.beginPath(); g.moveTo(0, H);
-      for (let x = 0; x <= W; x += 8) { const u = x / W * Math.PI * 2; g.lineTo(x, base - amp * (0.5 * Math.sin(u * fq + ph[0]) + 0.3 * Math.sin(u * fq * 2.3 + ph[1]) + 0.2 * Math.sin(u * fq * 5.1 + ph[2]))); }
-      g.lineTo(W, H); g.closePath(); g.fill(); };
-    ridge(H * 0.52, 70, 2, 'rgba(150,165,180,0.95)', 3);
-    ridge(H * 0.6, 60, 3, 'rgba(110,128,120,1)', 5);
-    for (let i = 0; i < 520; i++) { const x = r2() * W, y = H * 0.66 + r2() * 40, rr = 18 + r2() * 46; g.fillStyle = `rgba(${48 + r2() * 20},${62 + r2() * 22},${40 + r2() * 14},0.95)`; g.beginPath(); g.ellipse(x, y - rr * 0.6, rr * 0.8, rr * 1.15, 0, 0, 7); g.fill(); }
-    const m = g.createLinearGradient(0, H * 0.7, 0, H); m.addColorStop(0, '#5F6B44'); m.addColorStop(1, '#4E5A38'); g.fillStyle = m; g.fillRect(0, H * 0.72, W, H * 0.28);
-  });
-  land.wrapS = THREE.RepeatWrapping;
-  const landM = new THREE.MeshBasicMaterial({ map: land, transparent: true, depthWrite: false, fog: false });
-  const pano = new THREE.Mesh(new THREE.CylinderGeometry(70, 70, 34, 96, 1, true), landM);
-  pano.material.side = THREE.BackSide; pano.position.set(0, 9, 0); pano.renderOrder = -0.5; room.add(pano);
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 24), new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false,
-    uniforms: { top: { value: new THREE.Color('#5E8FC9') }, hor: { value: new THREE.Color('#F2E2CC') }, sunDir: { value: new THREE.Vector3(0, 1, 1) }, sunCol: { value: new THREE.Color('#FFF1D6') } },
-    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `uniform vec3 top; uniform vec3 hor; uniform vec3 sunDir; uniform vec3 sunCol; varying vec3 vD;
-      void main(){ float h = clamp(vD.y, 0.0, 1.0); vec3 c = mix(hor, top, pow(h, 0.55));
-        float s = max(dot(normalize(vD), normalize(sunDir)), 0.0); c += sunCol * (pow(s, 900.0) * 6.0 + pow(s, 12.0) * 0.35);
-        if (vD.y < 0.0) c = mix(hor * 0.55, vec3(0.20,0.22,0.16), clamp(-vD.y * 6.0, 0.0, 1.0));
-        gl_FragColor = vec4(c, 1.0); }`,
-  }));
-  sky.renderOrder = -1; room.add(sky);
+  // sheer linen curtains on a ceiling track, gathered at both ends of the glazing
+  const sheerTex = canvasTex(256, 256, (g, W) => { const r2 = rng(23); g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, W, W); for (let i = 0; i < W; i += 2) { g.fillStyle = `rgba(200,190,175,${0.05 + r2() * 0.06})`; g.fillRect(i, 0, 1, W); } });
+  sheerTex.repeat.set(6, 4);
+  const sheerM = new THREE.MeshStandardMaterial({ color: '#F4EFE6', map: sheerTex, roughness: 1, side: THREE.DoubleSide, transparent: true, opacity: 0.86, emissive: new THREE.Color('#FFF3E2'), emissiveIntensity: 0.25 });
+  const curtain = (width, height, folds, seed) => {
+    const geo = new THREE.PlaneGeometry(width, height, Math.max(24, folds * 10), 10), p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) { const t = (p.getX(i) + width / 2) / width, y = p.getY(i); p.setZ(i, 0.045 * Math.sin(t * folds * Math.PI * 2 + seed) + 0.012 * Math.sin(t * folds * 5.3 + seed * 2) * (0.5 - y / height)); }
+    geo.computeVertexNormals(); const m = new THREE.Mesh(geo, sheerM); m.receiveShadow = true; return m;
+  };
+  box(2 * gx + 0.7, 0.025, 0.04, steel, 0, ROOM.H - 0.03, HZ - 0.14, 1, false);
+  for (const [x, w, sd] of [[-gx + 0.32, 0.95, 0.3], [gx - 0.32, 0.95, 1.7]]) { const c = curtain(w, ROOM.H - 0.06, 6, sd); c.position.set(x, (ROOM.H - 0.06) / 2 + 0.01, HZ - 0.14); c.rotation.y = Math.PI; room.add(c); }
+  const sky = { material: { uniforms: { top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3() }, sunCol: { value: new THREE.Color() } } } };
 
   // rug + reading corner by the window: lounge chair, side table, floor lamp
   const rugMap = canvasTex(512, 512, (g, W) => { g.fillStyle = '#CFC4B2'; g.fillRect(0, 0, W, W); const r2 = rng(9); for (let i = 0; i < 9000; i++) { const v = 180 + r2() * 50; g.fillStyle = `rgba(${v},${v - 8},${v - 20},0.5)`; g.fillRect(r2() * W, r2() * W, 2, 2); } });
@@ -226,18 +219,19 @@ export function buildRoom(scene) {
   rb(0.15, 0.6, 0.86, 0.07, boucle, -0.355, 0.34, 0); rb(0.15, 0.6, 0.86, 0.07, boucle, 0.355, 0.34, 0);
   rb(0.86, 0.74, 0.17, 0.07, boucle, 0, 0.41, -0.345); rb(0.565, 0.15, 0.7, 0.055, boucle, 0, 0.37, 0.07);
   const bc = rb(0.56, 0.4, 0.17, 0.075, boucle, 0, 0.635, -0.225); bc.rotation.x = -0.17;
-  chair.position.set(-2.2, 0, 2.1); chair.rotation.y = Math.PI * 0.8; room.add(chair);
+  chair.position.set(-2.0, 0, 1.85); chair.rotation.y = Math.PI * 0.8; room.add(chair);
   const side = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.2, 0.48, 48), new THREE.MeshStandardMaterial({ color: '#CFC3AF', roughness: 0.7 }));
-  side.position.set(-1.5, 0.24, 2.5); side.castShadow = side.receiveShadow = true; room.add(side);
+  side.position.set(-1.3, 0.24, 2.25); side.castShadow = side.receiveShadow = true; room.add(side);
   const lamp = new THREE.Group();
   const lb = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.175, 0.028, 48), new THREE.MeshStandardMaterial({ color: '#2B2826', roughness: 0.3 })); lb.position.y = 0.014; lamp.add(lb);
   const ls = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 1.42, 16), brass); ls.position.y = 0.74; lamp.add(ls);
   const shadeM = new THREE.MeshStandardMaterial({ color: '#F1E7D6', roughness: 0.95, side: THREE.DoubleSide, emissive: new THREE.Color('#FFC98A'), emissiveIntensity: 0.4 });
   const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.24, 0.33, 48, 1, true), shadeM); shade.position.y = 1.56; lamp.add(shade);
   const bulb = new THREE.PointLight('#FFC98A', 0, 4, 2); bulb.position.y = 1.5; lamp.add(bulb);
-  lamp.position.set(-2.8, 0, 1.45); room.add(lamp);
+  lamp.position.set(-2.62, 0, 1.2); room.add(lamp);
 
-  return { room, sky, cove, shadeM, bulb, glass, walls, steel, brass, HX, HZ, gx, gh, landM, ceilM };
+  room.add(plantInPot(-2.45, -2.15));
+  return { room, sky, cove, shadeM, bulb, glass, glassM, sheerM, walls, steel, brass, HX, HZ, gx, gh, ceilM };
 }
 
 // picture + picture light + plaque + plinth for one bay (bay frame: origin on the wall at floor, +z into the room)
@@ -286,7 +280,6 @@ export function lightShafts(scene) {
   }, false);
   const mat = new THREE.MeshBasicMaterial({ map: t, color: '#FFE2B8', transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
   const group = new THREE.Group();
-  for (let i = 0; i < 4; i++) { const p = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 6), mat); p.position.set(-1.5 + i * 1.0, 0, 0); group.add(p); }
   scene.add(group);
   const N = 500, pos = new Float32Array(N * 3), r = rng(3);
   for (let i = 0; i < N; i++) { pos[i * 3] = (r() - 0.5) * 5; pos[i * 3 + 1] = 0.2 + r() * 2.6; pos[i * 3 + 2] = (r() - 0.5) * 5; }
@@ -295,4 +288,33 @@ export function lightShafts(scene) {
   const dust = new THREE.Points(dg, new THREE.PointsMaterial({ size: 0.006, map: dot, transparent: true, opacity: 0.0, color: '#FFF1D8', blending: THREE.AdditiveBlending, depthWrite: false }));
   scene.add(dust);
   return { group, mat, dust };
+}
+
+// olive-like branches in a stone pot, as in the review viewer
+function plantInPot(x, z) {
+  const g = new THREE.Group(), r = rng(9);
+  const potM = new THREE.MeshStandardMaterial({ color: '#B8A994', roughness: 0.85 });
+  const prof = [[0, 0], [0.14, 0], [0.2, 0.05], [0.23, 0.17], [0.215, 0.31], [0.13, 0.46], [0.1, 0.53], [0.11, 0.56], [0.095, 0.56], [0, 0.5]];
+  const pot = new THREE.Mesh(new THREE.LatheGeometry(prof.map(([a, b]) => new THREE.Vector2(a, b)), 48), potM); pot.castShadow = pot.receiveShadow = true; g.add(pot);
+  const stemM = new THREE.MeshStandardMaterial({ color: '#5B4A3A', roughness: 0.9 }), leafM = new THREE.MeshStandardMaterial({ color: '#6F7A5E', roughness: 0.72, side: THREE.DoubleSide });
+  const leafGeo = new THREE.PlaneGeometry(0.016, 0.072, 1, 4);
+  { const p = leafGeo.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i) / 0.036; p.setX(i, p.getX(i) * Math.cos(y * 1.45)); p.setZ(i, -0.008 * y * y); } leafGeo.translate(0, 0.036, 0); leafGeo.computeVertexNormals(); }
+  const leaves = [], stems = [];
+  for (let b = 0; b < 8; b++) {
+    const a = (b / 8) * Math.PI * 2 + r(), tilt = 0.12 + r() * 0.35, pts = [];
+    for (let k = 0; k <= 6; k++) { const t = k / 6, rr = 0.65 * Math.sin(tilt) * t * (0.6 + r() * 0.5) + t * t * 0.08 * r(); pts.push(new THREE.Vector3(Math.cos(a) * rr, 1.6 * (0.25 + 0.75 * t) * (0.75 + 0.25 * r()), Math.sin(a) * rr)); }
+    pts[0].set(0, 0, 0);
+    const curve = new THREE.CatmullRomCurve3(pts); stems.push(new THREE.TubeGeometry(curve, 40, 0.0045, 6));
+    for (let k = 0; k < 80; k++) {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(r() * 6.28, r() * 6.28, r() * 6.28)), sc = 0.7 + r() * 0.6;
+      leaves.push(leafGeo.clone().applyMatrix4(new THREE.Matrix4().compose(curve.getPoint(0.25 + 0.75 * r()), q, new THREE.Vector3(sc, sc, sc))));
+    }
+  }
+  const merge = (list0) => { const list = list0.map(x => x.index ? x.toNonIndexed() : x); const n = list.reduce((a, x) => a + x.attributes.position.count, 0), pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), idx = []; let o = 0;
+    for (const gi of list) { pos.set(gi.attributes.position.array, o * 3); nor.set(gi.attributes.normal.array, o * 3); for (let i = 0; i < gi.attributes.position.count; i++) idx.push(o + i); o += gi.attributes.position.count; }
+    const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, o * 3), 3)); out.setAttribute('normal', new THREE.BufferAttribute(nor.subarray(0, o * 3), 3)); out.setIndex(idx); return out; };
+  const st = new THREE.Mesh(merge(stems), stemM); st.position.y = 0.45; st.castShadow = true; g.add(st);
+  const lv = new THREE.Mesh(merge(leaves), leafM); lv.position.y = 0.45; lv.castShadow = true; g.add(lv);
+  g.position.set(x, 0, z);
+  return g;
 }
