@@ -63,14 +63,19 @@ const hemi = new THREE.HemisphereLight('#F3EEE6', '#7A6450', 0.25); hemi.layers.
 const spots = {};
 
 // ════════════════════════════════════════════════════════════════════ state
-// graphics quality: supersampling (render above the headset's native resolution), foveation, shadow resolution
-const QUALITY = { Standard: { scale: 1.0, fov: 0.6, shadow: 2048 }, High: { scale: 1.3, fov: 0.35, shadow: 4096 }, Ultra: { scale: 1.6, fov: 0.2, shadow: 4096 } };
+// graphics quality (never the resolution): sun shadow resolution and softness, gallery spots casting soft shadows
+const QUALITY = { Standard: { shadow: 2048, spotShadow: 0, blur: 8 }, High: { shadow: 4096, spotShadow: 1024, blur: 12 }, Ultra: { shadow: 4096, spotShadow: 2048, blur: 20 } };
 let quality = 'High'; try { const q = localStorage.getItem('oaa-quality'); if (QUALITY[q]) quality = q; } catch (e) {}
 function applyQuality() {
   const Q = QUALITY[quality];
-  if (!renderer.xr.isPresenting) renderer.xr.setFramebufferScaleFactor(Q.scale);   // takes effect on the next Enter VR
-  renderer.xr.setFoveation(Q.fov);
-  if (sun.shadow.mapSize.x !== Q.shadow) { sun.shadow.mapSize.set(Q.shadow, Q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; shadowDirty = true; }
+  if (sun.shadow.mapSize.x !== Q.shadow) { sun.shadow.mapSize.set(Q.shadow, Q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
+  sun.shadow.blurSamples = Q.blur;
+  for (const sp of Object.values(spots)) {
+    sp.castShadow = Q.spotShadow > 0;
+    if (Q.spotShadow && sp.shadow.mapSize.x !== Q.spotShadow) { sp.shadow.mapSize.set(Q.spotShadow, Q.spotShadow); sp.shadow.map?.dispose(); sp.shadow.map = null; }
+    Object.assign(sp.shadow, { bias: -0.0004, normalBias: 0.02, radius: 7, blurSamples: Q.blur }); sp.shadow.camera.near = 0.3; sp.shadow.camera.far = 7;
+  }
+  shadowDirty = true;
   try { localStorage.setItem('oaa-quality', quality); } catch (e) {}
 }
 const S = { hour: 21.8, hourTarget: 21.8, sunRot: 0.15, gallery: true, dimmer: 0.75, volume: 0.8, floor: 0, playing: null };

@@ -16,7 +16,7 @@ Works on a desktop browser too (drag to look, WASD to walk, click to interact).
 - **Records**: let go of one near a turntable and it loads itself (disc out of the sleeve, onto the platter, sleeve set aside, tonearm down);
   near a free slot (it glows) it slides back in; set down gently on a top it lies flat. Each console plays its own track.
 - **Turntables**: press one to start / stop it (music is generated live, through that piece's speakers).
-- **Tablets**: time of day, sun direction, interior lights, gallery spots, floor height, graphics quality (High by default; Ultra supersamples more); records, volume, open/close all, reset.
+- **Tablets**: time of day, sun direction, interior lights, gallery spots, floor height, graphics quality (shadow detail and soft shadows from the gallery spots; resolution is never changed); records, volume, open/close all, reset.
 - Left stick walks, right stick snap-turns; hand tracking works for grabbing and tapping the tablets.
 
 Built with three.js (WebXR). The furniture models are the final CAD exports with real textures.
